@@ -1,6 +1,5 @@
 import {
   max as dateFnsMax,
-  min as dateFnsMin,
   differenceInDays,
   formatDuration as durationToString,
   getMilliseconds as getSecondAsMilliseconds,
@@ -77,27 +76,6 @@ export function validTimeToDate(validTime: ValidTime): Date {
   }
 
   return parsedDate;
-}
-
-/**
- * Returns the earliest `Date` from the given times.
- *
- * Each argument is normalized via {@link validTimeToDate} before comparison,
- * so a mix of {@link Timestamp} objects, ISO 8601 strings, epoch numbers, and
- * `Date` instances is accepted.
- *
- * @param validTimes - One or more times to compare.
- * @returns The earliest time as a `Date`.
- * @throws {RangeError} If called with no arguments.
- * @throws {TypeError} If any argument cannot be converted to a valid `Date`
- *   (propagated from {@link validTimeToDate}).
- */
-export function minDate(...validTimes: ValidTime[]): Date {
-  if (!validTimes.length) {
-    throw new RangeError('Requires at least one time');
-  }
-
-  return dateFnsMin(validTimes.map((validTime) => validTimeToDate(validTime)));
 }
 
 /**
