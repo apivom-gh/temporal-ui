@@ -4,7 +4,7 @@ import type { EventGroups } from '$lib/models/event-groups/event-groups';
 import type { WorkflowEvents } from '$lib/types/events';
 import type { WorkflowExecution } from '$lib/types/workflows';
 import { isWorkflowDelayed } from '$lib/utilities/delayed-workflows';
-import { minDate, validTimeToDate } from '$lib/utilities/format-time';
+import { validTimeToDate } from '$lib/utilities/format-time';
 import { isNotNullish } from '$lib/utilities/type-predicates';
 
 import { Timespan } from './timespan';
@@ -48,17 +48,27 @@ export class Timeline {
 
   readonly workflow = $derived.by(() => this.#getWorkflow());
   readonly eventGroups = $derived.by(() => this.#getEventGroups());
-  readonly workflowTimespan = $derived.by(() => {
-    const fullEventHistory = this.#getFullEventHistory();
+  private readonly _endUnbounded = $derived(!this.workflow.endTime);
+
+  private readonly _endMs = $derived.by(() => {
     const end = this.workflow.endTime ?? this.#getCurrentTimeMs();
+    return validTimeToDate(end).getTime();
+  });
+
+  private readonly _startMs = $derived.by(() => {
+    // Event history is ordered ascending by event time, so the earliest event
+    // is the first entry — no need to map and scan the whole array.
+    const firstEventTime = this.#getFullEventHistory()[0]?.eventTime;
 
     const startCandidates = [
-      ...fullEventHistory.map((wfEvent) => wfEvent?.eventTime),
+      firstEventTime,
       this.workflow.executionTime,
     ].filter(isNotNullish);
 
     const earliestStartTime = startCandidates.length
-      ? minDate(...startCandidates)
+      ? Math.min(
+          ...startCandidates.map((time) => validTimeToDate(time).getTime()),
+        )
       : undefined;
 
     const start =
@@ -66,15 +76,21 @@ export class Timeline {
         ? this.workflow.startTime
         : earliestStartTime) ??
       this.workflow.startTime ??
-      end;
+      this._endMs;
 
-    const endMs = validTimeToDate(end).getTime();
-    const startMs = Math.min(validTimeToDate(start).getTime(), endMs);
-
-    return new Timespan(startMs, endMs, {
-      endUnbounded: !this.workflow.endTime,
-    });
+    return Math.min(validTimeToDate(start).getTime(), this._endMs);
   });
+
+  // Split into primitive deriveds so the Timespan is only reconstructed when a
+  // boundary actually changes. Streaming in more events reruns _startMs (O(1)),
+  // but an unchanged number won't propagate, so segments and everything
+  // downstream stay cached.
+  readonly workflowTimespan = $derived.by(
+    () =>
+      new Timespan(this._startMs, this._endMs, {
+        endUnbounded: this._endUnbounded,
+      }),
+  );
 
   readonly segments = $derived.by<TimeSegment[]>(() => {
     return buildTimeSegments({
