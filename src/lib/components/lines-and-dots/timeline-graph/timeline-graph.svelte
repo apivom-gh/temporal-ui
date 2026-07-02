@@ -464,19 +464,18 @@
       style:--dot="{dotSize}px"
       style:--dot-r="{dotRadius}px"
     >
-      <!-- Hidden symbol sheet; each icon is a <svg><use href="#ti-…"> instance. -->
-      <svg class="icon-defs" aria-hidden="true"><TimelineIconDefs /></svg>
+      <TimelineIconDefs />
 
       <!-- Border rails -->
       <div
-        class="rail"
+        class="absolute bg-current"
         style:left="{GUTTER - RADIUS / 4}px"
         style:top="{lineTop}px"
         style:width="{RADIUS / 2}px"
         style:height="{lineBottom}px"
       ></div>
       <div
-        class="rail"
+        class="absolute bg-current"
         style:left="{canvasWidth - GUTTER - RADIUS / 4}px"
         style:top="{lineTop}px"
         style:width="{RADIUS / 2}px"
@@ -494,7 +493,7 @@
       <WorkflowRow {workflow} y={ROW_HEIGHT} length={canvasWidth} />
       {#if !loading}
         <!-- Anchor's left provides the gutter offset for the layer's 0-based coords. -->
-        <div class="collapsed-layer" style:left="{GUTTER}px">
+        <div class="absolute top-0" style:left="{GUTTER}px">
           <TimelineCollapsedLayer
             {scale}
             {timelineHeight}
@@ -505,11 +504,13 @@
       {/if}
 
       <!-- Keyed by slot index so Svelte reuses the <li>s in place; the <li>
-           persists when its slot is null, only the inner row toggles. -->
-      <ul class="rows">
+           persists when its slot is null, only the inner row toggles.
+           pointer-events-none so clicks fall through to the collapse toggles;
+           event buttons opt back in with pointer-events:auto. -->
+      <ul class="pointer-events-none absolute inset-0 m-0 list-none p-0">
         {#each pool as slot, slotIndex (slotIndex)}
           <li
-            class="row-anchor"
+            class="absolute left-0 right-0"
             style={slot
               ? `top:${getY(slot.index) - ROW_HEIGHT / 2}px;height:${ROW_HEIGHT}px;${shiftFor(slot.index)}`
               : 'display:none;'}
@@ -535,7 +536,7 @@
         })}
         {@const rectH = pendingGroupCount * ROW_HEIGHT + RADIUS}
         <div
-          class="skeleton animate-pulse rounded bg-slate-400/30"
+          class="absolute animate-pulse rounded bg-slate-400/30"
           style:left="{GUTTER}px"
           style:top="{rectY}px"
           style:width="{canvasWidth - GUTTER * 2}px"
@@ -572,45 +573,6 @@
     color: rgb(var(--color-text-primary));
   }
 
-  /* Hidden symbol sheet — takes no layout space. */
-  .icon-defs {
-    position: absolute;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-  }
-
-  .rail {
-    position: absolute;
-    background: currentColor;
-  }
-
-  .collapsed-layer {
-    position: absolute;
-    top: 0;
-  }
-
-  /* pointer-transparent so clicks fall through to the collapse toggles below;
-     the event buttons opt back in with pointer-events:auto. */
-  .rows {
-    position: absolute;
-    inset: 0;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    pointer-events: none;
-  }
-
-  .row-anchor {
-    position: absolute;
-    left: 0;
-    right: 0;
-  }
-
-  .skeleton {
-    position: absolute;
-  }
-
   /* Connector-line styles for the row components' `.tl-line` divs; :global since
      they're in children, scoped under .canvas so they don't leak. Elements set
      geometry + --tl-line-color inline. border-radius: 9999px → pill ends. */
@@ -637,8 +599,7 @@
     animation: tl-line-dash 60s linear infinite;
   }
 
-  /* -global- so the name isn't scope-hashed. */
-  @keyframes -global-tl-line-dash {
+  @keyframes tl-line-dash {
     from {
       background-position-x: 200px;
     }
