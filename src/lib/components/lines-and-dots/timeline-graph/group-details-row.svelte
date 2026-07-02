@@ -13,7 +13,7 @@
   import { formatEventGroupDuration } from '$lib/utilities/event-group-duration';
   import { isChildWorkflowExecutionStartedEvent } from '$lib/utilities/is-event-type';
 
-  import GraphWidget from '../graph-widget.svelte';
+  import GraphWidget from './graph-widget.svelte';
 
   type Props = {
     group: EventGroup;

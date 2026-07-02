@@ -17,13 +17,12 @@
   } from '$lib/utilities/is-pending-activity';
 
   import {
+    dotColors,
     getNextDistanceAndOffset,
     HistoryConfig,
     isMiddleEvent,
+    strokeColor,
   } from '../constants';
-
-  import Dot from './dot.svelte';
-  import Line from './line.svelte';
 
   interface Props {
     event: WorkflowEventWithPending;
@@ -38,6 +37,7 @@
 
   const { height, radius } = HistoryConfig;
   const strokeWidth = radius / 2;
+  const DOT_STROKE = 1; // dot border (matches the old Dot usage here)
 
   const y = $derived(index * height + height / 2);
   const distanceAndOffset = $derived(
@@ -102,48 +102,90 @@
   );
 </script>
 
-<g
-  role="button"
-  tabindex="0"
-  aria-label={accessibleName}
-  class="relative cursor-pointer"
->
+{#snippet dot(point: [number, number], eventClassification?: string | null)}
+  {@const colors = dotColors(eventClassification)}
+  <rect
+    fill={colors.fill}
+    stroke={colors.stroke}
+    stroke-width={DOT_STROKE}
+    x={point[0] - radius}
+    y={point[1] - radius}
+    width={radius * 2}
+    height={radius * 2}
+    rx={radius * 0.3}
+  />
+{/snippet}
+
+{#snippet line(opts: {
+  startPoint: [number, number];
+  endPoint: [number, number];
+  category?: EventTypeCategory | 'pending' | 'retry';
+  pending?: boolean;
+})}
+  {@const {
+    startPoint,
+    endPoint,
+    category: lineCategory,
+    pending = false,
+  } = opts}
+  <line
+    stroke={strokeColor({ category: lineCategory })}
+    class:animate-line={pending}
+    stroke-width={2}
+    stroke-dasharray={pending ? '3' : 'none'}
+    x1={Math.max(0, startPoint[0])}
+    x2={Math.max(0, endPoint[0])}
+    y1={startPoint[1]}
+    y2={endPoint[1]}
+  />
+{/snippet}
+
+<g role="img" aria-label={accessibleName}>
   {#if connectLine}
-    <Line
-      startPoint={[canvasWidth, y]}
-      endPoint={[canvasWidth - horizontalOffset - radius, y]}
-    />
+    {@render line({
+      startPoint: [canvasWidth, y],
+      endPoint: [canvasWidth - horizontalOffset - radius, y],
+    })}
   {/if}
   {#if !reverseSort}
-    <Dot
-      point={[canvasWidth - horizontalOffset, y]}
-      {classification}
-      strokeWidth={1}
-    />
+    {@render dot([canvasWidth - horizontalOffset, y], classification)}
   {/if}
   {#if zoomNextDistance}
-    <Line
-      startPoint={[
+    {@render line({
+      startPoint: [
         canvasWidth - horizontalOffset - radius / 2 + strokeWidth,
         y + radius + strokeWidth / 2,
-      ]}
-      endPoint={[
+      ],
+      endPoint: [
         canvasWidth - horizontalOffset - radius / 2 + strokeWidth,
         y + zoomNextDistance + radius,
-      ]}
-      category={group?.pendingActivity
+      ],
+      category: group?.pendingActivity
         ? Number(group.pendingActivity.attempt) > 1
           ? 'retry'
           : 'pending'
-        : category}
-      pending={nextIsPending}
-    />
+        : category,
+      pending: nextIsPending,
+    })}
   {/if}
   {#if reverseSort}
-    <Dot
-      point={[canvasWidth - horizontalOffset, y]}
-      {classification}
-      strokeWidth={1}
-    />
+    {@render dot([canvasWidth - horizontalOffset, y], classification)}
   {/if}
 </g>
+
+<style lang="postcss">
+  .animate-line {
+    stroke-dashoffset: 0;
+    animation: dash 60s linear infinite;
+  }
+
+  @keyframes dash {
+    from {
+      stroke-dashoffset: 200;
+    }
+
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+</style>

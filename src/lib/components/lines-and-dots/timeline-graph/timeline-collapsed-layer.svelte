@@ -3,8 +3,9 @@
   import { translate } from '$lib/i18n/translate';
   import { formatDistanceAbbreviated } from '$lib/utilities/format-time';
 
-  import { TimelineConfig } from '../../constants';
-  import type { TimelineScale } from '../timeline-scale.svelte';
+  import { TimelineConfig } from '../constants';
+
+  import type { TimelineScale } from './timeline-scale.svelte';
 
   type Props = {
     scale: TimelineScale;

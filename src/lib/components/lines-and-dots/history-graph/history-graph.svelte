@@ -9,7 +9,6 @@
   import { getNextDistanceAndOffset, HistoryConfig } from '../constants';
 
   import HistoryGraphRowVisual from './history-graph-row-visual.svelte';
-  import Line from './line.svelte';
 
   interface Props {
     groups: EventGroups;
@@ -57,10 +56,13 @@
     height={canvasHeight}
     width={canvasWidth}
   >
-    <Line
-      startPoint={[visualWidth, 0]}
-      endPoint={[visualWidth, canvasHeight]}
-      strokeWidth={3}
+    <line
+      stroke="currentColor"
+      stroke-width={3}
+      x1={visualWidth}
+      x2={visualWidth}
+      y1={0}
+      y2={canvasHeight}
     />
     <svg
       viewBox="0 0 {canvasWidth} {canvasHeight}"

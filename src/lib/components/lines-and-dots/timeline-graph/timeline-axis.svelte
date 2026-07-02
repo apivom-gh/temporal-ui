@@ -2,8 +2,9 @@
   import type { Timestamp } from '$lib/types';
   import { formatDistanceAbbreviated } from '$lib/utilities/format-time';
 
-  import { TimelineConfig } from '../../constants';
-  import type { TimelineScale } from '../timeline-scale.svelte';
+  import { TimelineConfig } from '../constants';
+
+  import type { TimelineScale } from './timeline-scale.svelte';
 
   type Props = {
     x1: number;

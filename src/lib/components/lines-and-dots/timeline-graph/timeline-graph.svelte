@@ -13,22 +13,22 @@
 
   import { TimelineConfig } from '../constants';
   import EndTimeInterval from '../end-time-interval.svelte';
-  import TimelineIconDefs from '../svg/timeline-icon-defs.svelte';
   import {
     getDescStart,
     getPendingBlockY,
     getRowY,
     getTotalForY,
-  } from '../svg/timeline-positioning';
+  } from './timeline-positioning';
 
-  import GroupDetailsRow from './html/group-details-row.svelte';
-  import TimelineAxis from './html/timeline-axis.svelte';
-  import TimelineCollapsedLayer from './html/timeline-collapsed-layer.svelte';
-  import TimelineGraphRow from './html/timeline-graph-row.svelte';
-  import WorkflowRow from './html/workflow-row.svelte';
+  import GroupDetailsRow from './group-details-row.svelte';
+  import TimelineAxis from './timeline-axis.svelte';
+  import TimelineCollapsedLayer from './timeline-collapsed-layer.svelte';
+  import TimelineGraphRow from './timeline-graph-row.svelte';
+  import TimelineIconDefs from './timeline-icon-defs.svelte';
   import { TimelineScale } from './timeline-scale.svelte';
   import { Timeline } from './timeline.svelte';
   import { Viewport } from './viewport.svelte';
+  import WorkflowRow from './workflow-row.svelte';
 
   interface Props {
     workflow: WorkflowExecution;
@@ -586,11 +586,13 @@
 <style lang="postcss">
   /* In-flow (like the old <svg>) so the sticky start/end labels float over it;
      -mt-4 tucks it under the controls border. Positioned so the absolutely
-     placed rows/axis resolve against it. */
+     placed rows/axis resolve against it. color drives currentColor for the
+     rails, axis baseline, grid lines, tick labels and currentColor-fallback row
+     labels, so it must be theme-aware — a hardcoded white only reads on dark. */
   .canvas {
     position: relative;
     margin-top: -1rem;
-    color: #fff;
+    color: rgb(var(--color-text-primary));
   }
 
   /* Hidden symbol sheet — takes no layout space. */

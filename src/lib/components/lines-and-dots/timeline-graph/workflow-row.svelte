@@ -4,8 +4,8 @@
   import { isWorkflowDelayed } from '$lib/utilities/delayed-workflows';
   import { getWorkflowStatusLabel } from '$lib/utilities/get-status-label';
 
-  import { dotBox, dotColorPair, lineBox, strokeColor } from './primitives';
-  import { TimelineConfig } from '../../constants';
+  import { dotBox, lineBox } from './primitives';
+  import { dotColors, strokeColor, TimelineConfig } from '../constants';
 
   interface Props {
     workflow: WorkflowExecution;
@@ -29,7 +29,7 @@
       delayed: isWorkflowDelayed(workflow),
     }),
   );
-  const pair = $derived(dotColorPair(workflow.status));
+  const colors = $derived(dotColors(workflow.status));
 
   const accessibleName = $derived(
     translate('workflows.row-accessible-name', {
@@ -58,21 +58,12 @@
     {@const dbox = dotBox(x, cy, radius, DOT_STROKE)}
     <div
       class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-      style="left:{dbox.left}px;top:{dbox.top}px;border-color:{pair[1]};background:{pair[0]};"
+      style="left:{dbox.left}px;top:{dbox.top}px;border-color:{colors.stroke};background:{colors.fill};"
     >
-      <svg class="icon" viewBox="0 0 24 24"><use href="#ti-workflow" /></svg>
+      <svg
+        class="absolute left-1/2 top-1/2 h-[55%] w-[55%] -translate-x-1/2 -translate-y-1/2 text-black"
+        viewBox="0 0 24 24"><use href="#ti-workflow" /></svg
+      >
     </div>
   {/each}
 </div>
-
-<style lang="postcss">
-  .icon {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 55%;
-    height: 55%;
-    transform: translate(-50%, -50%);
-    color: #000;
-  }
-</style>

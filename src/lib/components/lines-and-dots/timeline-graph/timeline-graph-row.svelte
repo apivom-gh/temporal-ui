@@ -38,20 +38,16 @@
     isActivityTaskStartedEvent,
   } from '$lib/utilities/is-event-type';
 
-  import {
-    type ColorPair,
-    dotBox,
-    dotColorPair,
-    lineBox,
-    strokeColor,
-    textColor,
-  } from './primitives';
+  import { dotBox, lineBox } from './primitives';
   import {
     CategoryIcon,
+    dotColors,
+    type DotColors,
+    strokeColor,
     TimelineConfig,
+    type TimelineIconName,
     timelineTextPosition,
-  } from '../../constants';
-  import type { TimelineIconName } from '../../svg/timeline-icon.svelte';
+  } from '../constants';
 
   type Props = {
     group: EventGroup;
@@ -138,17 +134,17 @@
     }
     // textPosition already encodes where the label goes; the label is rendered
     // once (outside the button), so textIndex is no longer needed.
-    const { textAnchor, textPosition, backdrop } = timelineTextPosition(
+    const { textAnchor, textPosition } = timelineTextPosition(
       points,
       height / 2,
       timelineWidth,
       group.isPending,
       TimelineConfig,
     );
-    return { points, textAnchor, textPosition, backdrop };
+    return { points, textAnchor, textPosition };
   };
 
-  const { points, textAnchor, textPosition, backdrop } = $derived(
+  const { points, textAnchor, textPosition } = $derived(
     getDistancePointsAndPositions(timelineWidth, group.eventList, eventCount),
   );
 
@@ -223,7 +219,7 @@
 )}
   {@const box = lineBox([lx, spanCy], [rx, spanCy], sw)}
   <div
-    class="el tl-line"
+    class="tl-line absolute"
     class:tl-line--gradient={opts.gradient}
     class:tl-line--dashed={opts.dashed}
     class:tl-line--animate={opts.animate}
@@ -233,19 +229,26 @@
   ></div>
 {/snippet}
 
-{#snippet dot(lx: number, pair: ColorPair, icon: TimelineIconName | undefined)}
+{#snippet dot(
+  lx: number,
+  colors: DotColors,
+  icon: TimelineIconName | undefined,
+)}
   {@const box = dotBox(lx, spanCy, radius, DOT_STROKE)}
   <div
-    class="el h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-    style="left:{box.left}px;top:{box.top}px;border-color:{pair[1]};background:{pair[0]};"
+    class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
+    style="left:{box.left}px;top:{box.top}px;border-color:{colors.stroke};background:{colors.fill};"
   >
     {#if icon}
-      <svg class="icon" viewBox="0 0 24 24"><use href="#ti-{icon}" /></svg>
+      <svg
+        class="absolute left-1/2 top-1/2 h-[55%] w-[55%] -translate-x-1/2 -translate-y-1/2 text-black"
+        viewBox="0 0 24 24"><use href="#ti-{icon}" /></svg
+      >
     {/if}
   </div>
 {/snippet}
 
-<div class="row">
+<div class="absolute inset-0">
   <button
     type="button"
     class="event"
@@ -278,11 +281,11 @@
             animate: true,
           },
         )}
-        {@render dot(lx, dotColorPair(group.lastEvent.classification), 'retry')}
+        {@render dot(lx, dotColors(group.lastEvent.classification), 'retry')}
       {/if}
       {@render dot(
         lx,
-        dotColorPair(group.eventList[index]?.classification),
+        dotColors(group.eventList[index]?.classification),
         pauseTime && index !== 0
           ? 'pause'
           : decodedLocalActivity
@@ -290,65 +293,63 @@
             : CategoryIcon[group.category].name,
       )}
     {/each}
-  </button>
-
-  <!-- Label sits outside the button — informational, not part of the hit target. -->
-  <PayloadSummary
-    value={group?.userMetadata?.summary}
-    prefix={isActivityTaskScheduledEvent(group.initialEvent)
-      ? group?.displayName
-      : ''}
-    fallback={decodedLocalActivity
-      ? translate('events.category.local-activity')
-      : group?.displayName}
-  >
-    {#snippet children(decodedValue)}
-      {@const iconName =
-        (pendingActivity && !pendingActivity.paused) || retried
-          ? 'retry'
-          : undefined}
-      <div
-        class="label {textAnchor === 'end' ? 'anchor-end' : ''}"
-        style="left:{textPosition[0]}px;top:{textPosition[1]}px;color:{textColor(
-          { backdrop, category: group.category },
-        )};"
-      >
-        {#if iconName}
-          <svg class="text-icon" viewBox="0 0 24 24"
-            ><use href="#ti-{iconName}" /></svg
-          >
-        {/if}
-        <span
-          class="text-body"
-          class:backdrop
-          style={backdrop ? `min-height:${radius * 2}px;` : ''}
+    <!-- Label lives inside the button so hovering or clicking it applies this
+         row's hover highlight to the dots and activates the same click target.
+         Positioned button-local (offset by spanLeft); it may overflow the
+         button box, which is not clipped. -->
+    <PayloadSummary
+      value={group?.userMetadata?.summary}
+      prefix={isActivityTaskScheduledEvent(group.initialEvent)
+        ? group?.displayName
+        : ''}
+      fallback={decodedLocalActivity
+        ? translate('events.category.local-activity')
+        : group?.displayName}
+    >
+      {#snippet children(decodedValue)}
+        {@const iconName =
+          (pendingActivity && !pendingActivity.paused) || retried
+            ? 'retry'
+            : undefined}
+        <div
+          class="pointer-events-auto absolute flex select-none items-center gap-1 whitespace-nowrap text-[13px] leading-none {textAnchor ===
+          'end'
+            ? '-translate-x-full -translate-y-1/2 flex-row-reverse'
+            : '-translate-y-1/2'}"
+          style="left:{textPosition[0] - spanLeft}px;top:{spanCy}px;"
         >
-          {#if pendingActivity}
-            {translate('workflows.attempt')}
-            {pendingActivity.attempt} / {pendingActivity.maximumAttempts || '∞'}
-            •&nbsp;{decodedValue}
-          {:else if retried}
-            {retryAttempt} • {decodedValue}
-          {:else if decodedLocalActivity}
-            {decodedLocalActivity.value}
-          {:else}
-            {decodedValue}
+          {#if iconName}
+            <svg class="h-[14px] w-[14px] text-current" viewBox="0 0 24 24">
+              <use href="#ti-{iconName}" />
+            </svg>
           {/if}
-        </span>
-      </div>
-    {/snippet}
-  </PayloadSummary>
+          <span
+            class="inline-flex min-h-[var(--dot)] items-center rounded-full bg-[rgb(var(--color-surface-primary))] px-1.5 text-current"
+          >
+            {#if pendingActivity}
+              {translate('workflows.attempt')}
+              {pendingActivity.attempt} / {pendingActivity.maximumAttempts ||
+                '∞'}
+              •&nbsp;{decodedValue}
+            {:else if retried}
+              {retryAttempt} • {decodedValue}
+            {:else if decodedLocalActivity}
+              {decodedLocalActivity.value}
+            {:else}
+              {decodedValue}
+            {/if}
+          </span>
+        </div>
+      {/snippet}
+    </PayloadSummary>
+  </button>
 </div>
 
 <style lang="postcss">
-  /* Fills the parent row anchor (which owns base Y + panel-shift transform). */
-  .row {
-    position: absolute;
-    inset: 0;
-  }
-
   /* Interactive target: only the dots + connectors between them. Native <button>
-     gives keyboard/focus/Enter/Space for free — no hover/focus JS state. */
+     gives keyboard/focus/Enter/Space for free — no hover/focus JS state. Kept in
+     scoped CSS: the highlight reveal is a descendant rule guarded by :not(:disabled),
+     which doesn't map to clean inline utilities. */
   .event {
     position: absolute;
     margin: 0;
@@ -377,52 +378,5 @@
   .event:not(:disabled):hover .highlight,
   .event:not(:disabled):focus-visible .highlight {
     opacity: 1;
-  }
-
-  .el {
-    position: absolute;
-  }
-
-  .icon {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 55%;
-    height: 55%;
-    transform: translate(-50%, -50%);
-    color: #000;
-  }
-
-  .label {
-    position: absolute;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    transform: translateY(-50%);
-    white-space: nowrap;
-    user-select: none;
-    line-height: 1;
-    font-size: 13px;
-    pointer-events: none;
-  }
-
-  .label.anchor-end {
-    transform: translate(-100%, -50%);
-    flex-direction: row-reverse;
-  }
-
-  .text-icon {
-    width: 14px;
-    height: 14px;
-    color: currentColor;
-  }
-
-  .text-body.backdrop {
-    display: inline-flex;
-    align-items: center;
-    padding: 0 6px;
-    border-radius: 9999px;
-    background: #141414;
-    color: #fff;
   }
 </style>
