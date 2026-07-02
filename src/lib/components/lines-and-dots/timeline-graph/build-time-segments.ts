@@ -3,7 +3,7 @@ import type {
   EventGroups,
 } from '$lib/models/event-groups/event-groups';
 import { maxDate, validTimeToDate } from '$lib/utilities/format-time';
-import { isNotNullish, isNullish } from '$lib/utilities/type-predicates';
+import { isNullish } from '$lib/utilities/type-predicates';
 
 import { Timespan } from './timespan';
 import type { TimeSegment } from './types';
@@ -39,26 +39,37 @@ export function buildTimeSegments({
   workflowTimespan: Timespan;
   eventGroups: EventGroups;
 }): TimeSegment[] {
-  const sortedGroupTimespans: Timespan[] = eventGroups
-    .map((group) => {
-      const startMs = getGroupStartMs(group);
-      if (isNullish(startMs)) {
-        return null;
-      }
+  const groupTimespans: Timespan[] = [];
 
-      return new Timespan(
-        startMs,
-        getGroupEndMs(group, workflowTimespan.endTimeMs),
-      );
-    })
-    .filter(isNotNullish)
-    .sort((a, b) => a.startTimeMs - b.startTimeMs);
+  let isSorted = true;
+  let prevStartTimeMs = -Infinity;
+  for (const group of eventGroups) {
+    const startMs = getGroupStartMs(group);
+
+    if (isNullish(startMs)) {
+      continue;
+    }
+
+    if (isSorted && startMs < prevStartTimeMs) {
+      isSorted = false;
+    }
+
+    groupTimespans.push(
+      new Timespan(startMs, getGroupEndMs(group, workflowTimespan.endTimeMs)),
+    );
+
+    prevStartTimeMs = startMs;
+  }
+
+  if (!isSorted) {
+    groupTimespans.sort((a, b) => a.startTimeMs - b.startTimeMs);
+  }
 
   const timeSegments: TimeSegment[] = [];
 
   let cursorMs: number = workflowTimespan.startTimeMs;
 
-  for (const groupTimespan of sortedGroupTimespans) {
+  for (const groupTimespan of groupTimespans) {
     const groupStart = workflowTimespan.clamp(groupTimespan.startTimeMs);
     const groupEnd = workflowTimespan.clamp(groupTimespan.endTimeMs);
 
