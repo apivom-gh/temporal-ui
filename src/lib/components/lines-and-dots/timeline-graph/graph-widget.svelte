@@ -45,9 +45,14 @@
 
 {#await getWorkflowAndEventHistory() then { workflow, history }}
   {#if workflow}
-    <div class="cursor-pointer overflow-auto {className}">
+    <!-- Bounded, scrollable box for the child-workflow mini-timeline. The graph
+         renders at full height inside; IntersectionObserver clips against this
+         scroll container, so it still virtualizes within the box. -->
+    <div
+      class="cursor-pointer overflow-auto {className}"
+      style="max-height: {viewportHeight}px;"
+    >
       <TimelineGraph
-        {viewportHeight}
         {workflow}
         groups={createGroups(workflow, history)}
         readOnly

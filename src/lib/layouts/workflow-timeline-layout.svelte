@@ -102,38 +102,10 @@
     updateEventFilterParams(page.url, { sort: newSort }, goto);
   };
 
-  // ── Dedicated timeline scroll container ────────────────────────────────────
-  // The timeline scrolls inside its own overflow-y container, so the
-  // container's scrollTop *is* the pan amount — no page-offset sentinel, no
-  // spacer-vs-page bookkeeping, no re-measuring when content above shifts.
-  // TimelineGraph keeps its translateY compositor model; we just feed it
-  // scrollTop and the container's height.
-  let scrollEl = $state<HTMLDivElement | null>(null);
-  let viewportHeight = $state(0);
-  let timelineScrollY = $state(0);
-  let controlsHeight = $state(0);
-  let scrollDirty = false;
-
-  // Space below the bottom axis for the rotated x-axis tick labels. Part of the
-  // scrollable content height so the labels always scroll fully into view.
-  const AXIS_LABEL_ZONE_PX = 150;
-
-  // Actual drawn height of the timeline, reported by TimelineGraph. The scroll
-  // content is exactly this plus the label zone, so the gap below the axis is
-  // always the label zone — no cross-component estimate to drift.
-  let graphContentHeight = $state(0);
-  const scrollContentHeight = $derived(
-    Math.max(graphContentHeight, 120) + AXIS_LABEL_ZONE_PX,
-  );
-  // Bound the scroll container to the viewport with an explicit dvh-based
-  // max-height. This is what makes it the scroll region (its clientHeight is the
-  // visible viewport, so getWindowBounds virtualizes correctly). flex-1 can't do
-  // this here — the app-shell column it lives in is percentage-height against an
-  // auto-height <main>, so it isn't a definite height for flex to divide.
-  const viewportMaxHeight = $derived(
-    `calc(100dvh - var(--top-nav-height, 3rem) - ${controlsHeight}px)`,
-  );
-
+  // The timeline renders in normal page flow: the page (#content-wrapper)
+  // scrolls it and the controls bar sticks to the top-nav. TimelineGraph
+  // virtualizes internally via IntersectionObserver, so there's no bounded
+  // scroll container, no scroll-offset bridge, and no height plumbing here.
   const estimatedTotalGroups = $derived.by(() => {
     if (historyCtx.fetchComplete) return groups.length;
     const totalEvents = historyCtx.totalExpectedEvents ?? 0;
@@ -144,30 +116,11 @@
     historyCtx.resume();
     bufferGroups = getGroupArray({ excludeWorkflowTasks: true });
 
-    // Scroll tracking: the container's onscroll handler only flips scrollDirty
-    // (zero layout reads / Svelte writes in the handler). This RAF tick reads
-    // scrollTop once per frame and writes it straight through as the pan — the
-    // scroll container's scrollTop IS the timeline offset, no math required.
-    let lastScrollTop = -1;
-    let rafId = 0;
-    const tick = () => {
-      if (scrollDirty && scrollEl) {
-        scrollDirty = false;
-        const top = scrollEl.scrollTop;
-        if (top !== lastScrollTop) {
-          lastScrollTop = top;
-          timelineScrollY = top;
-        }
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-
     // Throttle buffer → Svelte updates to at most once per animation frame.
-    // onLatestGroup fires for every new group head (~N times during load),
-    // each triggering getGroupArray() (O(N log N) sort) + full Svelte
-    // reactive cascade. Batching via rAF reduces that to ≤60 updates/sec
-    // regardless of how fast the bidirectional cursors push data.
+    // onLatestGroup fires for every new group head (~N times during load), each
+    // triggering getGroupArray() (O(N log N) sort) + a full reactive cascade;
+    // batching via rAF caps that at ≤60 updates/sec regardless of how fast the
+    // bidirectional cursors push data.
     let groupUpdatePending = false;
     const unsub = onLatestGroup(() => {
       if (!groupUpdatePending) {
@@ -180,7 +133,6 @@
     });
 
     return () => {
-      cancelAnimationFrame(rafId);
       unsub();
     };
   });
@@ -238,13 +190,12 @@
 
 <!--
   Wrapper: single flex child so the parent's gap-4 only applies once (above
-  this block). Internally the controls bar and the scroll container are in
-  normal block flow with no gaps, so they sit flush.
+  this block). The controls bar sticks below the top-nav while the page scrolls
+  the timeline past it; the timeline virtualizes itself via IntersectionObserver.
 -->
 <div>
   <div
     class="surface-background sticky top-0 z-[11] flex flex-wrap items-center justify-between gap-2 border-b border-subtle pb-2 md:top-[var(--top-nav-height)] md:pt-2 xl:gap-8"
-    bind:clientHeight={controlsHeight}
   >
     <div class="flex items-center gap-2">
       <h2>{translate('workflows.timeline-tab')}</h2>
@@ -301,41 +252,22 @@
   </div>
 
   <!--
-  Dedicated scroll container: its own scrollTop is the timeline pan, so no
-  page-offset measurement is needed. The dvh-based max-height bounds it to the
-  viewport so it (not the page) is the scroll region — which is what keeps
-  virtualization working: its clientHeight is the visible height fed to
-  getWindowBounds. The tall inner element supplies the scroll range; the sticky
-  wrapper is the pinned viewport TimelineGraph pans within (translateY
-  compositor model). border-t supplies the border timeline-graph omits.
+  Timeline in page flow: it's a tall element the page scrolls, and it
+  virtualizes itself via IntersectionObserver (no bounded scroll container,
+  no scroll-offset bridge).
 -->
-  <div
-    class="relative overflow-y-auto overflow-x-hidden border-t border-subtle"
-    style="max-height: {viewportMaxHeight};"
-    bind:this={scrollEl}
-    bind:clientHeight={viewportHeight}
-    onscroll={() => (scrollDirty = true)}
-  >
-    {#if workflow}
-      <div style="height: {scrollContentHeight}px;">
-        <div class="sticky top-0" style="height: {viewportHeight}px;">
-          <TimelineGraph
-            {workflow}
-            {groups}
-            {reverseSort}
-            loading={!historyCtx.fetchComplete}
-            scrollY={timelineScrollY}
-            {viewportHeight}
-            totalExpectedEvents={estimatedTotalGroups}
-            descMinId={historyCtx.descMinId}
-            error={Boolean(workflowTaskFailedError)}
-            bind:contentHeight={graphContentHeight}
-            onTimelineInit={handleTimelineInit}
-          />
-        </div>
-      </div>
-    {/if}
-  </div>
+  {#if workflow}
+    <TimelineGraph
+      {workflow}
+      {groups}
+      {reverseSort}
+      loading={!historyCtx.fetchComplete}
+      totalExpectedEvents={estimatedTotalGroups}
+      descMinId={historyCtx.descMinId}
+      error={Boolean(workflowTaskFailedError)}
+      onTimelineInit={handleTimelineInit}
+    />
+  {/if}
 </div>
 <!-- end wrapper -->
 

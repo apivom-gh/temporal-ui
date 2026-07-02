@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
+
   import { twMerge } from 'tailwind-merge';
 
   import { timestamp } from '$lib/components/timestamp.svelte';
@@ -36,10 +38,6 @@
     y?: number;
     workflow: WorkflowExecution;
     groups: EventGroups;
-    /** Container viewport height in px — overrides the self-measured height. */
-    viewportHeight?: number;
-    /** External scrollY in px, driven by the parent's sentinel element. */
-    scrollY?: number;
     readOnly?: boolean;
     error?: boolean;
     reverseSort?: boolean;
@@ -47,9 +45,6 @@
     totalExpectedEvents?: number;
     descMinId?: number;
     panelHeight?: number;
-    /** Actual drawn content height (rows + axis + panel), reported to the parent
-     * so it can size the scroll container to exactly what the graph renders. */
-    contentHeight?: number;
     onTimelineInit?: (timeline: Timeline) => void;
   }
 
@@ -58,8 +53,6 @@
     y = 0,
     workflow,
     groups,
-    viewportHeight = 0,
-    scrollY: scrollYProp = undefined,
     readOnly = false,
     error = false,
     reverseSort = false,
@@ -67,14 +60,12 @@
     totalExpectedEvents = 0,
     descMinId = 0,
     panelHeight = $bindable(0),
-    contentHeight = $bindable(0),
     onTimelineInit,
   }: Props = $props();
 
   const { height, gutter, radius } = TimelineConfig;
 
   let canvasWidth = $state(0);
-  const scrollY = $derived(scrollYProp ?? 0);
 
   // PERF: bind:clientWidth={canvasWidth} compiled to bind_element_size which reads
   // element.clientWidth inside a Svelte effect during every reactive flush (~150×
@@ -85,40 +76,25 @@
   //   2. Debounce via requestAnimationFrame to break any oscillation where a width
   //      change causes re-renders that change the width again.
   let containerEl = $state<HTMLDivElement | null>(null);
-  // Self-measured container height for the virtualization guard.
-  // The parent can override via the viewportHeight prop; if it doesn't (or
-  // passes 0), we fall back to this measurement so the guard always fires.
-  let _measuredHeight = $state(0);
-  const effectiveViewportHeight = $derived(
-    viewportHeight > 0 ? viewportHeight : _measuredHeight,
-  );
 
   $effect(() => {
     if (!containerEl) return;
-    // PERF: Use contentRect.width from the ResizeObserver callback for ALL reads —
-    // including the initial one. contentRect is computed by the browser during layout
-    // and returned as part of the notification; reading it here does NOT force an
-    // additional synchronous reflow (unlike offsetWidth/clientWidth which do).
-    //
-    // The first callback fires in the same rendering cycle as observe(), so there is
-    // no one-frame flash. We apply it immediately (no RAF) so the SVG has a real
-    // width on the first paint. Subsequent callbacks are RAF-debounced to prevent
-    // oscillation where a width change causes re-renders that alter the width again.
+    // PERF: Use contentRect.width from the ResizeObserver callback — the browser
+    // already computed it during layout, so reading it here forces no extra
+    // reflow (unlike offsetWidth/clientWidth). First callback applies
+    // immediately (no flash); later ones are RAF-debounced to break any
+    // width→re-render→width oscillation.
     let isFirst = true;
     let rafId: ReturnType<typeof requestAnimationFrame>;
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const w = Math.round(entry.contentRect.width);
-      const h = Math.round(entry.contentRect.height);
+      const w = Math.round(entries[0].contentRect.width);
       if (isFirst) {
         isFirst = false;
         canvasWidth = w;
-        _measuredHeight = h;
       } else {
         cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
           canvasWidth = w;
-          _measuredHeight = h;
         });
       }
     });
@@ -342,16 +318,92 @@
   );
 
   // The open detail panel shifts every row below it down by panelHeight (via a
-  // transform), but getWindowBounds maps scroll → rows using the unshifted
-  // getRowY. Widen the mount window by the panel's row span so those shifted
-  // rows stay mounted instead of leaving a blank band under the panel that
-  // grows until you scroll a full panelHeight.
+  // transform), but getWindowBounds maps y → rows using the unshifted getRowY.
+  // Widen the mount window by the panel's row span so those shifted rows stay
+  // mounted instead of leaving a blank band under the panel.
   const windowOverscan = $derived(OVERSCAN + Math.ceil(panelHeight / height));
 
-  const [windowStart, windowEnd] = $derived(
-    getWindowBounds(
-      scrollY,
-      effectiveViewportHeight,
+  // Full drawn height of the timeline (rows + axis + detail panel). The SVG is
+  // this tall plus a label zone and scrolls with the page — there is no
+  // translateY; the page itself pans it.
+  const timelineHeight = $derived(
+    Math.max(height * (filteredGroups.length + pendingGroupCount + 2), 120) +
+      panelHeight,
+  );
+  const AXIS_LABEL_ZONE = 150;
+  const svgHeight = $derived(timelineHeight + AXIS_LABEL_ZONE);
+
+  // ── IntersectionObserver virtualization ────────────────────────────────────
+  // Because the SVG scrolls with the page (no bounded container to read
+  // scrollTop/clientHeight from), invisible sentinels spaced every
+  // SENTINEL_BLOCK_PX down the content report — via an IntersectionObserver
+  // rooted at the viewport — which pixel bands are near view. Their union is fed
+  // to the existing getWindowBounds math (asc/desc/pending aware) so only rows
+  // in view (+ rootMargin overscan) mount. rootMargin is the scroll overscan.
+  const SENTINEL_BLOCK_PX = 800;
+  const SENTINEL_ROOT_MARGIN = '400px';
+  const sentinelCount = $derived(
+    Math.max(1, Math.ceil(svgHeight / SENTINEL_BLOCK_PX)),
+  );
+
+  const visibleBlocks = new SvelteSet<number>();
+  // Created eagerly (SSR-guarded) so sentinels can self-observe in their action,
+  // which runs during mount — before any $effect would. Disconnected on unmount.
+  const sentinelObserver =
+    typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              const block = Number(entry.target.getAttribute('data-block'));
+              if (entry.isIntersecting) {
+                visibleBlocks.add(block);
+              } else {
+                visibleBlocks.delete(block);
+              }
+            }
+          },
+          { root: null, rootMargin: SENTINEL_ROOT_MARGIN },
+        );
+
+  $effect(() => () => sentinelObserver?.disconnect());
+
+  function observeSentinel(node: HTMLElement, block: number) {
+    let current = block;
+    node.dataset.block = String(current);
+    sentinelObserver?.observe(node);
+    return {
+      update(next: number) {
+        current = next;
+        node.dataset.block = String(current);
+      },
+      destroy() {
+        sentinelObserver?.unobserve(node);
+        visibleBlocks.delete(current);
+      },
+    };
+  }
+
+  // Visible pixel band from the intersecting sentinels. null until the observer
+  // first reports — the initial paint falls back to the top of the timeline.
+  const visibleBand = $derived.by<[number, number] | null>(() => {
+    if (!visibleBlocks.size) return null;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const block of visibleBlocks) {
+      if (block < min) min = block;
+      if (block > max) max = block;
+    }
+    return [min * SENTINEL_BLOCK_PX, (max + 1) * SENTINEL_BLOCK_PX];
+  });
+
+  const [windowStart, windowEnd] = $derived.by(() => {
+    const band = visibleBand;
+    const top = band ? band[0] : 0;
+    const bandHeight = band ? band[1] - band[0] : Math.min(svgHeight, 1000);
+    return getWindowBounds(
+      top,
+      bandHeight,
       filteredGroups.length,
       height,
       windowOverscan,
@@ -359,8 +411,8 @@
       descStart,
       pendingGroupCount,
       totalForY,
-    ),
-  );
+    );
+  });
 
   const windowedGroups = $derived(filteredGroups.slice(windowStart, windowEnd));
 
@@ -376,29 +428,7 @@
         }),
   );
 
-  // PERF: timelineHeight is driven purely by panelHeight (delivered async by
-  // the ResizeObserver in group-details-row). On click, panelHeight starts at
-  // 0, so timelineHeight does NOT change — Line and TimelineAxis are not
-  // dirtied. They only update once the panel is actually measured, which is
-  // the correct moment. The old Math.max(panelHeight, 800) caused a spurious
-  // +800px jump every click, triggering unnecessary setAttribute calls on
-  // both Line components and all Axis tick marks.
-  const timelineHeight = $derived(
-    Math.max(height * (filteredGroups.length + pendingGroupCount + 2), 120) +
-      panelHeight,
-  );
-
-  // Report the true drawn height back to the parent so it sizes the scroll
-  // container to what we actually render — never a separate row-count estimate,
-  // which drifts under filters/loading and leaves a variable gap below the axis.
-  $effect(() => {
-    contentHeight = timelineHeight;
-  });
-
-  // Border rails span the full graph height so they meet the bottom axis
-  // regardless of scroll position. They're only two points each and update
-  // solely when timelineHeight changes (row add/remove, panel), so there's no
-  // per-scroll-frame cost from spanning the whole timeline.
+  // Border rails span the full timeline height so they meet the bottom axis.
   const lineTop = 0;
   const lineBottom = $derived(timelineHeight);
 </script>
@@ -406,11 +436,27 @@
 <div
   id="event-history-timeline-graph"
   class={twMerge(
-    'relative h-full overflow-hidden border border-t-0 border-subtle bg-primary',
+    'relative overflow-hidden border border-t-0 border-subtle bg-primary',
     error && 'bg-danger',
   )}
+  style="height: {svgHeight}px;"
   bind:this={containerEl}
 >
+  <!--
+    IntersectionObserver virtualization sentinels: invisible pixel bands that
+    report (against the viewport) which part of the page-scrolled timeline is in
+    view, so only the rows near it mount. Purely for measurement — no visuals.
+  -->
+  <div class="pointer-events-none absolute inset-0" aria-hidden="true">
+    {#each Array(sentinelCount) as _, block (block)}
+      <div
+        class="absolute left-0 w-px"
+        style="top: {block *
+          SENTINEL_BLOCK_PX}px; height: {SENTINEL_BLOCK_PX}px;"
+        use:observeSentinel={block}
+      ></div>
+    {/each}
+  </div>
   <EndTimeInterval {workflow} {startTime} bind:currentTime={nowMs} let:endTime>
     <div
       class="pointer-events-none sticky top-[120px]"
@@ -426,35 +472,20 @@
       </div>
     </div>
     <!--
-      PERF SCROLL: The <svg> element itself carries the CSS translateY so
-      that scroll-driven panning is handled at the compositor layer.
-
-      Why <svg> rather than a child <g>:
-        - The SVG root is treated as a replaced HTML element by Blink/Chrome,
-          so will-change: transform promotes it to a GPU compositing layer.
-        - Updating a composited CSS transform does NOT invalidate computed
-          styles for descendants — CodeMirror's observers.scroll then reads
-          scrollTop against a clean layout tree, eliminating the forced
-          style-recalculation of all 4 k+ SVG children that previously cost
-          50-100 ms every scroll frame.
-        - Inner SVG elements (<g>, <rect> …) are NOT independently
-          compositor-promoted, so transform on a <g> still triggers a full
-          style recalculation of its subtree.
-
-      viewBox is FIXED at "0 0 w h" — it never changes on scroll.
-      overflow="visible" allows windowed rows above/below the viewport rect
-      to exist in the DOM; the parent overflow-hidden div clips the rendering.
+      The <svg> is the full timeline height and scrolls with the page — no
+      translateY. Rows render at their absolute y; the page reveals the visible
+      portion natively, and IntersectionObserver decides which rows are mounted.
+      Only windowed rows exist in the DOM, so the SVG stays light despite being
+      tall.
     -->
     <svg
       {x}
       {y}
-      viewBox="0 0 {canvasWidth} {effectiveViewportHeight}"
-      height={effectiveViewportHeight}
+      viewBox="0 0 {canvasWidth} {svgHeight}"
+      height={svgHeight}
       width={canvasWidth}
       overflow="visible"
       class="-mt-4"
-      style:transform="translateY(-{scrollY}px)"
-      style:will-change="transform"
     >
       <!--
         PERF: Defines all 11 timeline icon <symbol> elements once per SVG.
@@ -579,56 +610,3 @@
     </svg>
   </EndTimeInterval>
 </div>
-
-<style lang="postcss">
-  .skeleton-rows {
-    border-radius: 4px;
-    overflow: hidden;
-    position: relative;
-    background-image: repeating-linear-gradient(
-      180deg,
-      transparent 0,
-      transparent 3px,
-      color-mix(in srgb, theme(colors.slate.400) 28%, transparent) 3px,
-      color-mix(in srgb, theme(colors.slate.400) 28%, transparent) 21px,
-      transparent 21px,
-      transparent 24px
-    );
-
-    :global(.dark) & {
-      background-image: repeating-linear-gradient(
-        180deg,
-        transparent 0,
-        transparent 3px,
-        color-mix(in srgb, theme(colors.slate.400) 40%, transparent) 3px,
-        color-mix(in srgb, theme(colors.slate.400) 40%, transparent) 21px,
-        transparent 21px,
-        transparent 24px
-      );
-    }
-
-    &::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(
-        90deg,
-        transparent 0%,
-        rgb(255 255 255 / 70%) 50%,
-        transparent 100%
-      );
-      animation: shimmer-lr 1.6s ease-in-out infinite;
-      will-change: transform;
-    }
-  }
-
-  @keyframes shimmer-lr {
-    from {
-      transform: translateX(-100%);
-    }
-
-    to {
-      transform: translateX(200%);
-    }
-  }
-</style>
