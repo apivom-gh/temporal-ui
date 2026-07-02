@@ -49,7 +49,7 @@
          virtualizes against this scroll parent. -->
     <div
       class="cursor-pointer overflow-auto {className}"
-      style="max-height: {viewportHeight}px;"
+      style:max-height="{viewportHeight}px"
     >
       <TimelineGraph
         {workflow}

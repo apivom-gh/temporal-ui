@@ -438,7 +438,7 @@
     'relative overflow-hidden border border-t-0 border-subtle bg-primary',
     error && 'bg-danger',
   )}
-  style="height: {svgHeight}px;"
+  style:height="{svgHeight}px"
   bind:this={containerEl}
 >
   <EndTimeInterval {workflow} {startTime} bind:currentTime={nowMs} let:endTime>
@@ -459,7 +459,10 @@
          only the windowed slots exist in the DOM. -->
     <div
       class="canvas"
-      style="width:{canvasWidth}px;height:{svgHeight}px;--dot:{dotSize}px;--dot-r:{dotRadius}px;"
+      style:width="{canvasWidth}px"
+      style:height="{svgHeight}px"
+      style:--dot="{dotSize}px"
+      style:--dot-r="{dotRadius}px"
     >
       <!-- Hidden symbol sheet; each icon is a <svg><use href="#ti-…"> instance. -->
       <svg class="icon-defs" aria-hidden="true"><TimelineIconDefs /></svg>
@@ -467,15 +470,17 @@
       <!-- Border rails -->
       <div
         class="rail"
-        style="left:{GUTTER - RADIUS / 4}px;top:{lineTop}px;width:{RADIUS /
-          2}px;height:{lineBottom}px;"
+        style:left="{GUTTER - RADIUS / 4}px"
+        style:top="{lineTop}px"
+        style:width="{RADIUS / 2}px"
+        style:height="{lineBottom}px"
       ></div>
       <div
         class="rail"
-        style="left:{canvasWidth -
-          GUTTER -
-          RADIUS / 4}px;top:{lineTop}px;width:{RADIUS /
-          2}px;height:{lineBottom}px;"
+        style:left="{canvasWidth - GUTTER - RADIUS / 4}px"
+        style:top="{lineTop}px"
+        style:width="{RADIUS / 2}px"
+        style:height="{lineBottom}px"
       ></div>
 
       <TimelineAxis
@@ -489,7 +494,7 @@
       <WorkflowRow {workflow} y={ROW_HEIGHT} length={canvasWidth} />
       {#if !loading}
         <!-- Anchor's left provides the gutter offset for the layer's 0-based coords. -->
-        <div class="collapsed-layer" style="left:{GUTTER}px;">
+        <div class="collapsed-layer" style:left="{GUTTER}px">
           <TimelineCollapsedLayer
             {scale}
             {timelineHeight}
@@ -531,8 +536,10 @@
         {@const rectH = pendingGroupCount * ROW_HEIGHT + RADIUS}
         <div
           class="skeleton animate-pulse rounded bg-slate-400/30"
-          style="left:{GUTTER}px;top:{rectY}px;width:{canvasWidth -
-            GUTTER * 2}px;height:{rectH}px;"
+          style:left="{GUTTER}px"
+          style:top="{rectY}px"
+          style:width="{canvasWidth - GUTTER * 2}px"
+          style:height="{rectH}px"
         ></div>
       {/if}
 

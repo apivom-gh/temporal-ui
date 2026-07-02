@@ -67,18 +67,22 @@
 <!-- baseline -->
 <div
   class="baseline"
-  style="left:{x1}px;top:{timelineHeight -
-    baselineWidth / 2}px;width:{distance}px;height:{baselineWidth}px;"
+  style:left="{x1}px"
+  style:top="{timelineHeight - baselineWidth / 2}px"
+  style:width="{distance}px"
+  style:height="{baselineWidth}px"
 ></div>
 
 {#each ticks as tickX (tickX)}
   <div
-    class="grid-line"
-    style="left:{tickX}px;top:0;height:{timelineHeight}px;"
+    class="grid-line top-0"
+    style:left="{tickX}px"
+    style:height="{timelineHeight}px"
   ></div>
   <div
     class="tick-label"
-    style="left:{tickX}px;top:{timelineHeight + RADIUS}px;"
+    style:left="{tickX}px"
+    style:top="{timelineHeight + RADIUS}px"
   >
     {formatDistanceAbbreviated({
       start: startTime,

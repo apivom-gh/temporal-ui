@@ -43,19 +43,27 @@
   role="img"
   aria-label={accessibleName}
   class="pointer-events-none absolute inset-x-0 outline-none"
-  style="top:{y - centerY}px;height:{ROW_HEIGHT}px;"
+  style:top="{y - centerY}px"
+  style:height="{ROW_HEIGHT}px"
 >
   <div
     class="tl-line absolute"
     class:tl-line--dashed={workflow.isRunning}
     class:tl-line--animate={workflow.isRunning}
-    style="left:{lineBounds.left}px;top:{lineBounds.top}px;width:{lineBounds.width}px;height:{lineBounds.height}px;--tl-line-color:{color};"
+    style:left="{lineBounds.left}px"
+    style:top="{lineBounds.top}px"
+    style:width="{lineBounds.width}px"
+    style:height="{lineBounds.height}px"
+    style:--tl-line-color={color}
   ></div>
   {#each [start, end] as pointX (pointX)}
     {@const dotBounds = dotBox(pointX, centerY)}
     <div
       class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-      style="left:{dotBounds.left}px;top:{dotBounds.top}px;border-color:{colors.stroke};background:{colors.fill};"
+      style:left="{dotBounds.left}px"
+      style:top="{dotBounds.top}px"
+      style:border-color={colors.stroke}
+      style:background={colors.fill}
     >
       <svg
         class="absolute left-1/2 top-1/2 h-[55%] w-[55%] -translate-x-1/2 -translate-y-1/2 text-black"

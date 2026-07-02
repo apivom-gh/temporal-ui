@@ -34,14 +34,18 @@
 
 {#snippet marker(centerX: number, centerY: number)}
   <div
-    class="marker"
-    style="left:{centerX - HIT_HALF_WIDTH}px;top:{centerY -
-      RADIUS}px;width:{HIT_WIDTH}px;height:{RADIUS * 2}px;"
+    class="absolute bg-primary"
+    style:left="{centerX - HIT_HALF_WIDTH}px"
+    style:top="{centerY - RADIUS}px"
+    style:width="{HIT_WIDTH}px"
+    style:height="{RADIUS * 2}px"
   ></div>
   <div
-    class="marker-icon"
-    style="left:{centerX - iconSize / 2}px;top:{centerY -
-      iconSize / 2}px;width:{iconSize}px;height:{iconSize}px;"
+    class="absolute"
+    style:left="{centerX - iconSize / 2}px"
+    style:top="{centerY - iconSize / 2}px"
+    style:width="{iconSize}px"
+    style:height="{iconSize}px"
   >
     <Icon
       class="text-secondary"
@@ -63,9 +67,10 @@
     {@const half = Math.min(ZIGZAG_HALF_WIDTH, (seg.endPx - seg.startPx) / 4)}
     <!-- Full-height zigzag as a tiled <pattern> (rasterized once, not a long polyline). -->
     <svg
-      class="zigzag"
-      style="left:{labelX - half}px;top:0;width:{half *
-        2}px;height:{timelineHeight}px;"
+      class="absolute top-0 overflow-visible"
+      style:left="{labelX - half}px"
+      style:width="{half * 2}px"
+      style:height="{timelineHeight}px"
     >
       <defs>
         <pattern
@@ -93,7 +98,11 @@
     </svg>
     {@render marker(labelX, ROW_HEIGHT)}
     {@render marker(labelX, timelineHeight)}
-    <div class="zigzag-label" style="left:{labelX}px;top:{labelY}px;">
+    <div
+      class="pointer-events-none absolute origin-left rotate-45 whitespace-nowrap text-[10px] leading-none text-secondary"
+      style:left="{labelX}px"
+      style:top="{labelY}px"
+    >
       {distance}
     </div>
   {/if}
@@ -104,62 +113,17 @@
       aria-label={seg.isCollapsed
         ? translate('workflows.show-idle-time-segment', { distance })
         : translate('workflows.hide-idle-time-segment', { distance })}
-      class="toggle-handle"
-      style="left:{seg.isCollapsed
-        ? labelX - HIT_HALF_WIDTH
-        : seg.startPx}px;top:0;width:{seg.isCollapsed
-        ? HIT_WIDTH
-        : seg.endPx - seg.startPx}px;height:{timelineHeight}px;"
+      class="absolute top-0 m-0 cursor-pointer border-0 bg-current p-0 opacity-0 outline-none transition-opacity duration-100 ease-in-out hover:opacity-20 focus-visible:opacity-20"
+      style:left="{seg.isCollapsed ? labelX - HIT_HALF_WIDTH : seg.startPx}px"
+      style:width="{seg.isCollapsed ? HIT_WIDTH : seg.endPx - seg.startPx}px"
+      style:height="{timelineHeight}px"
       onclick={() => handleToggle(seg.key)}
     ></button>
   {/if}
 {/each}
 
 <style lang="postcss">
-  .zigzag {
-    position: absolute;
-    overflow: visible;
-  }
-
   .zigzag-path {
     stroke: rgb(var(--color-text-secondary));
-  }
-
-  .zigzag-label {
-    position: absolute;
-    font-size: 10px;
-    line-height: 1;
-    white-space: nowrap;
-    transform: rotate(45deg);
-    transform-origin: left center;
-    fill: rgb(var(--color-text-secondary));
-    color: rgb(var(--color-text-secondary));
-    pointer-events: none;
-  }
-
-  .marker {
-    position: absolute;
-    background: rgb(var(--color-surface-primary));
-  }
-
-  .marker-icon {
-    position: absolute;
-  }
-
-  .toggle-handle {
-    position: absolute;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: currentColor;
-    cursor: pointer;
-    opacity: 0;
-    outline: none;
-    transition: opacity 0.1s ease-in-out;
-  }
-
-  .toggle-handle:hover,
-  .toggle-handle:focus-visible {
-    opacity: 0.2;
   }
 </style>

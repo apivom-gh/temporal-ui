@@ -201,9 +201,12 @@
     class:tl-line--gradient={opts.gradient}
     class:tl-line--dashed={opts.dashed}
     class:tl-line--animate={opts.animate}
-    style="left:{bounds.left}px;top:{bounds.top}px;width:{bounds.width}px;height:{bounds.height}px;--tl-line-color:{color};{opts.dim
-      ? `opacity:${opts.dim};`
-      : ''}"
+    style:left="{bounds.left}px"
+    style:top="{bounds.top}px"
+    style:width="{bounds.width}px"
+    style:height="{bounds.height}px"
+    style:--tl-line-color={color}
+    style:opacity={opts.dim || null}
   ></div>
 {/snippet}
 
@@ -215,7 +218,10 @@
   {@const bounds = dotBox(pointX, spanCy)}
   <div
     class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-    style="left:{bounds.left}px;top:{bounds.top}px;border-color:{colors.stroke};background:{colors.fill};"
+    style:left="{bounds.left}px"
+    style:top="{bounds.top}px"
+    style:border-color={colors.stroke}
+    style:background={colors.fill}
   >
     {#if icon}
       <svg
@@ -232,13 +238,15 @@
     class="event"
     aria-label={accessibleName}
     disabled={readOnly}
-    style="left:{spanLeft}px;top:{ROW_HEIGHT / 2 -
-      HALO}px;width:{spanWidth}px;height:{RADIUS * 3}px;"
+    style:left="{spanLeft}px"
+    style:top="{ROW_HEIGHT / 2 - HALO}px"
+    style:width="{spanWidth}px"
+    style:height="{RADIUS * 3}px"
     onclick={onClick}
   >
     <div
       class="highlight {groupHover({ category: group.category })}"
-      style="border-radius:{highlightRadius}px;"
+      style:border-radius="{highlightRadius}px"
     ></div>
     {#each points as pointX, index (index)}
       {@const localX = pointX - spanLeft}
@@ -296,7 +304,8 @@
           'end'
             ? '-translate-x-full -translate-y-1/2 flex-row-reverse'
             : '-translate-y-1/2'}"
-          style="left:{textPosition[0] - spanLeft}px;top:{spanCy}px;"
+          style:left="{textPosition[0] - spanLeft}px"
+          style:top="{spanCy}px"
         >
           {#if iconName}
             <svg class="h-[14px] w-[14px] text-current" viewBox="0 0 24 24">

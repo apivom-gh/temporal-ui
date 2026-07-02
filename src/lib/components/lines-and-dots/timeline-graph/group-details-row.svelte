@@ -75,7 +75,12 @@
   });
 </script>
 
-<div class="panel" style="left:{x}px;top:{y}px;width:{canvasWidth}px;">
+<div
+  class="panel"
+  style:left="{x}px"
+  style:top="{y}px"
+  style:width="{canvasWidth}px"
+>
   <div bind:this={contentEl} class="flex flex-col">
     <div
       class="relative flex h-full items-center justify-between bg-slate-50 text-sm dark:bg-slate-800"

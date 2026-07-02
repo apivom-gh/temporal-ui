@@ -47,7 +47,8 @@
 
 <div
   class="hidden text-right xl:block"
-  style="width: {canvasWidth}px; max-width: {maxWidth}px;"
+  style:width="{canvasWidth}px"
+  style:max-width="{maxWidth}px"
   class:overflow-hidden={canvasWidth > maxWidth}
 >
   <svg
