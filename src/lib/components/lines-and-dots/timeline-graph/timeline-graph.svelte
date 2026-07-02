@@ -263,10 +263,10 @@
 
   // Open detail panel pushes rows below the active one down by panelHeight.
   // reverseSort flips "below" to i < activeIdx.
-  function shiftFor(i: number): string {
-    if (activeIdx < 0 || panelHeight === 0) return '';
+  function shiftFor(i: number): number {
+    if (activeIdx < 0 || panelHeight === 0) return 0;
     const shifted = reverseSort ? i < activeIdx : i > activeIdx;
-    return shifted ? `transform:translateY(${panelHeight}px);` : '';
+    return shifted ? panelHeight : 0;
   }
 
   const descStart = $derived(
@@ -510,10 +510,13 @@
       <ul class="pointer-events-none absolute inset-0 m-0 list-none p-0">
         {#each pool as slot, slotIndex (slotIndex)}
           <li
-            class="absolute left-0 right-0"
-            style={slot
-              ? `top:${getY(slot.index) - ROW_HEIGHT / 2}px;height:${ROW_HEIGHT}px;${shiftFor(slot.index)}`
-              : 'display:none;'}
+            class="absolute left-0 right-0 top-0"
+            style:display={slot ? 'block' : 'none'}
+            style:height="{ROW_HEIGHT}px"
+            style:contain="layout"
+            style:transform={slot
+              ? `translateY(${getY(slot.index) - ROW_HEIGHT / 2 + shiftFor(slot.index)}px)`
+              : undefined}
           >
             {#if slot}
               <TimelineGraphRow
