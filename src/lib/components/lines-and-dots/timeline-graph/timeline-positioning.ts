@@ -1,47 +1,13 @@
-/**
- * Pure positioning math for the bidirectional-fetch timeline.
- *
- * During loading the service fetches from both ends concurrently:
- *   ascending cursor  → groups 0 … descStart-1  (oldest events, top in asc / bottom in desc)
- *   descending cursor → groups descStart … N-1    (newest events, bottom in asc / top in desc)
- *   pending gap       → pendingGroupCount estimated rows between the two cursor ranges
- *
- * Visual layout (ascending sort):
- *   row 2         ← first ascending group
- *   …
- *   row descStart+1  ← last ascending group
- *   [PENDING BLOCK — pendingGroupCount rows]
- *   row descStart+2+pendingGroupCount  ← first descending group
- *   …
- *
- * Visual layout (descending sort, newest-first):
- *   row 2         ← newest descending group  (high index, low y)
- *   …
- *   row N2+1      ← oldest descending group
- *   [PENDING BLOCK — pendingGroupCount rows]
- *   row N2+pendingGroupCount+2  ← newest ascending group
- *   …                           (low index, high y = bottom)
- */
+import { RADIUS, ROW_HEIGHT } from './constants';
 
-/** Minimal shape needed from EventGroup to locate the cursor split. */
 export type GroupForPositioning = {
   initialEvent: { id: string };
 };
 
-/**
- * Index of the first group that came from the descending cursor.
- * All groups at indices 0 … descStart-1 are ascending-cursor groups.
- *
- * Uses `initialEvent.id` (the actual event ID, always a sequential integer)
- * rather than `group.id` (the scheduling-event ID which, for timer-fired /
- * external-signal events, points to a *different* earlier event and can break
- * sorted-order assumptions that a binary search would rely on).
- *
- * Returns `groups.length` (i.e. "no split") when:
- *   - descMinId is 0  (descending page hasn't arrived yet)
- *   - loading is false (fetch complete, gap is gone)
- *   - pendingGroupCount is 0 (no gap to render)
- */
+// First index whose group came from the descending cursor (groups[0..descStart-1]
+// are ascending). Uses initialEvent.id (a real sequential event id), not group.id,
+// which for timer/signal events points at an earlier event and breaks sort order.
+// Returns groups.length ("no split") while there's no gap to render.
 export function getDescStart(
   groups: GroupForPositioning[],
   descMinId: number,
@@ -55,14 +21,9 @@ export function getDescStart(
   return groups.length;
 }
 
-/**
- * Total row-span used as the denominator in the descending-sort y formula.
- * When both cursors have contributed rows we extend by pendingGroupCount so
- * there is space for the loading gap between the two cursor ranges.
- * When only one cursor has data (descStart === filteredGroupsLength) we keep
- * it equal to filteredGroupsLength so the loaded rows stay at their natural
- * position near the top/bottom rather than being pushed off-screen.
- */
+// Denominator for the descending-sort y formula. Extended by pendingGroupCount
+// only when both cursors have rows (so the loading gap has space); otherwise it
+// stays at filteredGroupsLength so loaded rows keep their natural position.
 export function getTotalForY(
   filteredGroupsLength: number,
   pendingGroupCount: number,
@@ -73,12 +34,8 @@ export function getTotalForY(
     : filteredGroupsLength;
 }
 
-/**
- * SVG y-coordinate (in px) for the group at index `i` in filteredGroups.
- *
- * Descending-cursor groups (i >= descStart) are shifted by pendingGroupCount
- * rows to open up visual space for the loading gap.
- */
+// y (px) for the group at index i. Descending-cursor groups (i >= descStart)
+// shift down by pendingGroupCount rows to open the loading gap.
 export function getRowY(
   i: number,
   {
@@ -86,44 +43,82 @@ export function getRowY(
     pendingGroupCount,
     totalForY,
     reverseSort,
-    height,
   }: {
     descStart: number;
     pendingGroupCount: number;
     totalForY: number;
     reverseSort: boolean;
-    height: number;
   },
 ): number {
   const offset = i >= descStart ? pendingGroupCount : 0;
   return reverseSort
-    ? (totalForY + 1 - i - offset) * height
-    : (i + 2 + offset) * height;
+    ? (totalForY + 1 - i - offset) * ROW_HEIGHT
+    : (i + 2 + offset) * ROW_HEIGHT;
 }
 
-/**
- * SVG y-coordinate for the top edge of the pending-gap rectangle.
- *
- * Ascending sort: gap sits directly below the N1 ascending-cursor rows.
- * Descending sort: gap sits directly below the N2 descending-cursor rows
- *   that occupy the top of the SVG (newest events first).
- */
+// y (px) for the top of the pending-gap rectangle — just below whichever rows sit
+// at the top of the graph (ascending rows, or descending rows when reverseSort).
 export function getPendingBlockY({
   descStart,
   filteredGroupsLength,
   reverseSort,
-  height,
-  radius,
 }: {
   descStart: number;
   filteredGroupsLength: number;
   reverseSort: boolean;
-  height: number;
-  radius: number;
 }): number {
-  // N2 = number of descending-cursor rows = filteredGroupsLength - descStart
   const topSectionRows = reverseSort
-    ? filteredGroupsLength - descStart // N2 desc rows at top in desc sort
-    : descStart; // N1 asc rows at top in asc sort
-  return (topSectionRows + 2) * height - radius;
+    ? filteredGroupsLength - descStart
+    : descStart;
+  return (topSectionRows + 2) * ROW_HEIGHT - RADIUS;
 }
+
+export const timelineTextPosition = (
+  points: number[],
+  y: number,
+  width: number,
+  isPending: boolean,
+) => {
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  let backdrop = false;
+  let textAnchor = 'start';
+  let textIndex = 0;
+
+  const textToLeft = firstPoint > (1 / 2) * width;
+  let textToRight = !textToLeft && lastPoint < (2 / 3) * width && !isPending;
+
+  if (textToLeft) textAnchor = 'end';
+  if (textToRight) textIndex = points.indexOf(lastPoint);
+
+  const offset = 1.5 * RADIUS;
+  let textX = textToRight ? lastPoint + offset : firstPoint - offset;
+
+  // Pending or long events
+  if (!textToRight && !textToLeft) {
+    backdrop = true;
+    textToRight = true;
+    textX = firstPoint + offset;
+
+    if (points.length === 2 && isPending) {
+      const gap = points[1] - points[0];
+      if (gap < width - points[1]) {
+        textIndex = 1;
+        textX = points[1] + offset;
+      }
+    }
+
+    if (points.length > 2) {
+      const gap1 = points[1] - points[0];
+      const gap2 = points[2] - points[1];
+      if (gap2 > gap1) {
+        textIndex = 1;
+        textX = points[1] + offset;
+      }
+    }
+  }
+
+  const textPosition = [textX, y] as [number, number];
+  return { textPosition, textIndex, textAnchor, backdrop };
+};

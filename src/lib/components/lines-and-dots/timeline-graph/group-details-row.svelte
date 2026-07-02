@@ -21,8 +21,7 @@
     endTime?: string | Date | number;
     x?: number;
     y: number;
-    // Callback so timeline-graph can shift the rows below this panel by the panel
-    // height via a single transform (O(1)), not per-row Y recomputation.
+    // Reports panel height so timeline-graph can shift the rows below it.
     onHeight?: (h: number) => void;
   };
 
@@ -35,19 +34,17 @@
     onHeight,
   }: Props = $props();
 
-  // ResizeObserver delivers height from its own callback (layout already
-  // computed), so the read is free — and it re-fires when CodeMirror lazily
-  // swaps in, re-measuring automatically.
+  // ResizeObserver so the height re-measures when CodeMirror lazily swaps in.
   let contentEl = $state<HTMLDivElement | undefined>(undefined);
   let contentHeight = 0;
 
   onMount(() => {
     if (!contentEl) return;
     const observer = new ResizeObserver(() => {
-      const h = contentEl!.offsetHeight;
-      if (h !== contentHeight) {
-        contentHeight = h;
-        onHeight?.(h);
+      const height = contentEl!.offsetHeight;
+      if (height !== contentHeight) {
+        contentHeight = height;
+        onHeight?.(height);
       }
     });
     observer.observe(contentEl);

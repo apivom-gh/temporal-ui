@@ -6,7 +6,8 @@
   import type { WorkflowEventWithPending } from '$lib/types/events';
   import { getGroupForEventOrPendingEvent } from '$lib/utilities/pending-activities';
 
-  import { getNextDistanceAndOffset, HistoryConfig } from '../constants';
+  import { RADIUS, ROW_HEIGHT } from './constants';
+  import { getNextDistanceAndOffset } from './positioning';
 
   import HistoryGraphRowVisual from './history-graph-row-visual.svelte';
 
@@ -22,9 +23,7 @@
   );
   const allGroups = $derived([...workflowTaskGroups, ...groups]);
 
-  const { height, radius } = HistoryConfig;
-
-  const nodeBuffer = 4 * radius;
+  const nodeBuffer = 4 * RADIUS;
   const maxWidth = 600;
 
   const canvasWidth = $derived.by(() => {
@@ -34,16 +33,16 @@
         history,
         event,
         groups,
-        height,
+        ROW_HEIGHT,
         $eventFilterSort,
       );
-      width = Math.max(width, offset * 1.75 * radius + nodeBuffer);
+      width = Math.max(width, offset * 1.75 * RADIUS + nodeBuffer);
     });
     return width;
   });
-  const visualWidth = $derived(Math.min(canvasWidth - 2 * radius, maxWidth));
+  const visualWidth = $derived(Math.min(canvasWidth - 2 * RADIUS, maxWidth));
 
-  const canvasHeight = $derived(history.length * height);
+  const canvasHeight = $derived(history.length * ROW_HEIGHT);
 </script>
 
 <div

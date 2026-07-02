@@ -94,7 +94,6 @@ describe('getRowY — ascending sort', () => {
     pendingGroupCount: 100,
     totalForY: 106,
     reverseSort: false,
-    height: H,
   };
 
   it('first ascending group (i=0) appears at y = 2*H (very top)', () => {
@@ -128,7 +127,6 @@ describe('getRowY — descending sort', () => {
     pendingGroupCount: 100,
     totalForY: 106,
     reverseSort: true,
-    height: H,
   };
 
   it('newest descending group (i = N-1 = 5) appears at y = 2*H (very top)', () => {
@@ -165,8 +163,6 @@ describe('getPendingBlockY', () => {
       descStart: 3,
       filteredGroupsLength: 6,
       reverseSort: false,
-      height: H,
-      radius: R,
     });
     expect(y).toBe(5 * H - R);
   });
@@ -179,8 +175,6 @@ describe('getPendingBlockY', () => {
       descStart: 3,
       filteredGroupsLength: 6,
       reverseSort: true,
-      height: H,
-      radius: R,
     });
     expect(y).toBe(5 * H - R);
   });
@@ -190,8 +184,6 @@ describe('getPendingBlockY', () => {
       descStart: 3,
       filteredGroupsLength: 3,
       reverseSort: false,
-      height: H,
-      radius: R,
     });
     // Same formula: (3+2)*H - R = 5H - R. The last row is at 4H so block is below it.
     expect(y).toBe(5 * H - R);
@@ -215,14 +207,11 @@ describe('no overlap: ascending sort', () => {
     pendingGroupCount: pending,
     totalForY,
     reverseSort: false,
-    height: H,
   };
   const blockY = getPendingBlockY({
     descStart,
     filteredGroupsLength: fLen,
     reverseSort: false,
-    height: H,
-    radius: R,
   });
   const blockH = pending * H + R;
 
@@ -265,14 +254,11 @@ describe('no overlap: descending sort', () => {
     pendingGroupCount: pending,
     totalForY,
     reverseSort: true,
-    height: H,
   };
   const blockY = getPendingBlockY({
     descStart,
     filteredGroupsLength: fLen,
     reverseSort: true,
-    height: H,
-    radius: R,
   });
   const blockH = pending * H + R;
 
@@ -323,7 +309,6 @@ describe('edge case: only ascending events loaded', () => {
     pendingGroupCount: pending,
     totalForY,
     reverseSort: false,
-    height: H,
   };
 
   it('ascending events appear at the top (y starts at 2*H)', () => {
@@ -337,8 +322,6 @@ describe('edge case: only ascending events loaded', () => {
       descStart,
       filteredGroupsLength: fLen,
       reverseSort: false,
-      height: H,
-      radius: R,
     });
     expect(blockY).toBeGreaterThan(2 * H); // NOT at top
     expect(blockY).toBeGreaterThan(getRowY(fLen - 1, cfg)); // below last row
@@ -363,7 +346,6 @@ describe('edge case: only descending events loaded (desc page arrived first)', (
     pendingGroupCount: pending,
     totalForY,
     reverseSort: false,
-    height: H,
   };
 
   it('ascending sort: first desc group is shifted down by pendingGroupCount', () => {
@@ -376,8 +358,6 @@ describe('edge case: only descending events loaded (desc page arrived first)', (
       descStart: 0,
       filteredGroupsLength: fLen,
       reverseSort: false,
-      height: H,
-      radius: R,
     });
     // descStart=0: blockY = (0+2)*H - R = 2H - R = 39px
     expect(blockY).toBe(2 * H - R);

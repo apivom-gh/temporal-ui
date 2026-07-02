@@ -54,11 +54,10 @@ export class TimelineScale {
       return last.endPx;
     }
 
-    // Segments are contiguous and time-sorted, so binary search the first
-    // segment whose end is at/after timeMs instead of scanning them all
-    // (project runs per event point on every row that mounts during scroll).
+    // Binary search (segments are contiguous + time-sorted); project runs per
+    // event point on every mounting row.
     const segment =
-      segments[firstIndexReaching(segments, (s) => s.endTimeMs, timeMs)];
+      segments[firstIndexReaching(segments, (seg) => seg.endTimeMs, timeMs)];
     const durationMs = segment.endTimeMs - segment.startTimeMs || 1;
     const ratio = (timeMs - segment.startTimeMs) / durationMs;
     return segment.startPx + ratio * (segment.endPx - segment.startPx);
@@ -81,7 +80,8 @@ export class TimelineScale {
       return last.endTimeMs;
     }
 
-    const segment = segments[firstIndexReaching(segments, (s) => s.endPx, px)];
+    const segment =
+      segments[firstIndexReaching(segments, (seg) => seg.endPx, px)];
     const widthPx = segment.endPx - segment.startPx || 1;
     const ratio = (px - segment.startPx) / widthPx;
     return (
@@ -97,17 +97,17 @@ function firstIndexReaching(
   end: (segment: ScaledSegment) => number,
   target: number,
 ): number {
-  let lo = 0;
-  let hi = segments.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
+  let low = 0;
+  let high = segments.length - 1;
+  while (low < high) {
+    const mid = (low + high) >> 1;
     if (end(segments[mid]) < target) {
-      lo = mid + 1;
+      low = mid + 1;
     } else {
-      hi = mid;
+      high = mid;
     }
   }
-  return lo;
+  return low;
 }
 
 function buildScaledSegments({

@@ -4,8 +4,9 @@
   import { isWorkflowDelayed } from '$lib/utilities/delayed-workflows';
   import { getWorkflowStatusLabel } from '$lib/utilities/get-status-label';
 
+  import { GUTTER, ROW_HEIGHT } from './constants';
   import { dotBox, lineBox } from './primitives';
-  import { dotColors, strokeColor, TimelineConfig } from '../constants';
+  import { dotColors, strokeColor } from '../colors';
 
   interface Props {
     workflow: WorkflowExecution;
@@ -15,14 +16,11 @@
 
   let { workflow, length, y }: Props = $props();
 
-  const { radius, height, gutter } = TimelineConfig;
-  const sw = radius * 2; // connector-line thickness
-  const DOT_STROKE = 2; // dot border (matches the SVG Dot default)
-  const cy = height / 2;
+  const centerY = ROW_HEIGHT / 2;
 
-  const start = $derived(gutter);
-  const end = $derived(start + length - 2 * gutter);
-  const box = $derived(lineBox([start, cy], [end, cy], sw));
+  const start = GUTTER;
+  const end = $derived(start + length - 2 * GUTTER);
+  const lineBounds = $derived(lineBox([start, centerY], [end, centerY]));
   const color = $derived(
     strokeColor({
       status: workflow.status,
@@ -39,26 +37,25 @@
   );
 </script>
 
-<!-- Informational bar, not interactive (no handler) → role="img" with a label,
-     not a button. pointer-events-none keeps it clear of the collapse toggles
-     underneath. -->
+<!-- Informational bar, not interactive → role="img"; pointer-events-none keeps
+     the collapse toggles below clickable. -->
 <div
   role="img"
   aria-label={accessibleName}
   class="pointer-events-none absolute inset-x-0 outline-none"
-  style="top:{y - cy}px;height:{height}px;"
+  style="top:{y - centerY}px;height:{ROW_HEIGHT}px;"
 >
   <div
     class="tl-line absolute"
     class:tl-line--dashed={workflow.isRunning}
     class:tl-line--animate={workflow.isRunning}
-    style="left:{box.left}px;top:{box.top}px;width:{box.width}px;height:{box.height}px;--tl-line-color:{color};"
+    style="left:{lineBounds.left}px;top:{lineBounds.top}px;width:{lineBounds.width}px;height:{lineBounds.height}px;--tl-line-color:{color};"
   ></div>
-  {#each [start, end] as x (x)}
-    {@const dbox = dotBox(x, cy, radius, DOT_STROKE)}
+  {#each [start, end] as pointX (pointX)}
+    {@const dotBounds = dotBox(pointX, centerY)}
     <div
       class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-      style="left:{dbox.left}px;top:{dbox.top}px;border-color:{colors.stroke};background:{colors.fill};"
+      style="left:{dotBounds.left}px;top:{dotBounds.top}px;border-color:{colors.stroke};background:{colors.fill};"
     >
       <svg
         class="absolute left-1/2 top-1/2 h-[55%] w-[55%] -translate-x-1/2 -translate-y-1/2 text-black"

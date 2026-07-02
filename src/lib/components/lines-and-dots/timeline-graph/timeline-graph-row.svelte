@@ -1,8 +1,7 @@
 <script module lang="ts">
   import { cva } from 'class-variance-authority';
 
-  // Hoisted to module scope: the variant config is prop-independent, so building
-  // it once (not per mounted row) keeps it off the virtualized-scroll hot path.
+  // Module scope so the variant config is built once, not per mounted row.
   const groupHover = cva(['h-full w-full border-2'], {
     variants: {
       category: {
@@ -39,24 +38,18 @@
   } from '$lib/utilities/is-event-type';
 
   import { dotBox, lineBox } from './primitives';
-  import {
-    CategoryIcon,
-    dotColors,
-    type DotColors,
-    strokeColor,
-    TimelineConfig,
-    type TimelineIconName,
-    timelineTextPosition,
-  } from '../constants';
+  import { type DotColors, dotColors, strokeColor } from '../colors';
+  import { CategoryIcon, type TimelineIconName } from '../constants';
+  import { GUTTER, RADIUS, ROW_HEIGHT } from './constants';
+  import { timelineTextPosition } from './timeline-positioning';
 
   type Props = {
     group: EventGroup;
     canvasWidth: number;
     project: (time: ValidTime | undefined | null) => number;
     readOnly: boolean;
-    // The group's current event count. Passed as a reactive prop so the row
-    // recomputes when events stream in (eventList is mutated in place) and when
-    // a pooled row is re-pointed to a different group.
+    // Reactive event count so the row recomputes on streamed appends (eventList
+    // is mutated in place) and on pooled re-point.
     eventCount?: number;
   };
 
@@ -68,11 +61,7 @@
     eventCount = 0,
   }: Props = $props();
 
-  const { height, gutter, radius } = TimelineConfig;
-  const sw = radius * 2; // connector-line thickness
-  const DOT_STROKE = 2; // dot border (matches the SVG Dot default)
-
-  const timelineWidth = $derived(canvasWidth - 2 * gutter);
+  const timelineWidth = $derived(canvasWidth - 2 * GUTTER);
   const pendingActivity = $derived(group?.pendingActivity);
 
   // Reactive (not untrack) so a re-pointed pooled row relabels for its new group.
@@ -90,8 +79,8 @@
 
   let decodedLocalActivity: SummaryAttribute | undefined = $state(undefined);
 
-  // Keyed on group (not onMount) so it re-runs when a pooled row is re-pointed.
-  // Reuses an already-decoded value cached on the group; otherwise decodes once.
+  // Keyed on group (not onMount) so it re-runs on pooled re-point; reuses a
+  // value already decoded onto the group, otherwise decodes once.
   $effect(() => {
     const currentGroup = group;
     decodedLocalActivity = currentGroup.decodedLocalActivity;
@@ -121,25 +110,20 @@
     events: EventGroup['eventList'],
     count: number,
   ) => {
-    // Iterate to `count` (= eventCount) rather than slicing first — this both
-    // creates the reactive dependency and avoids allocating a throwaway array
-    // on every recompute (hot: runs per pooled slot as it re-points on scroll).
+    // Loop to `count` (not events.map) to depend on eventCount without allocating.
     const points: number[] = [];
-    const n = Math.min(count, events.length);
-    for (let idx = 0; idx < n; idx++) {
+    const pointCount = Math.min(count, events.length);
+    for (let idx = 0; idx < pointCount; idx++) {
       points.push(Math.round(project(events[idx].eventTime)));
     }
     if (pauseTime) {
       points.push(Math.round(project(pauseTime)));
     }
-    // textPosition already encodes where the label goes; the label is rendered
-    // once (outside the button), so textIndex is no longer needed.
     const { textAnchor, textPosition } = timelineTextPosition(
       points,
-      height / 2,
+      ROW_HEIGHT / 2,
       timelineWidth,
       group.isPending,
-      TimelineConfig,
     );
     return { points, textAnchor, textPosition };
   };
@@ -183,32 +167,26 @@
     }),
   );
 
-  // The button wraps just the dots + connectors (not the whole row). Its bounds
-  // are the old hover-highlight region; the highlight is a child shown via the
-  // button's native :hover / :focus-visible, so no hover/focus JS state is
-  // needed. Coordinates inside the button are button-local (offset by spanLeft).
-  const HALO = radius * 1.5;
-  // Focus/hover highlight corner radius, concentric with the dots' corners:
-  // dot outer corner (radius*0.3 + DOT_STROKE/2) + the gap the highlight extends
-  // past the dot edge ((radius*3 - dotOuter)/2) collapses to radius * 0.8.
-  const highlightRadius = radius * 0.8;
+  // The button spans just the dots + connectors; its coords are button-local
+  // (offset by spanLeft). Hover/focus highlight is CSS-only (no JS state).
+  const HALO = RADIUS * 1.5;
+  // Highlight corner radius, concentric with the dots' rounded corners.
+  const highlightRadius = RADIUS * 0.8;
   const spanLeft = $derived(points[0] - HALO);
   const spanWidth = $derived(
     (group.isPending && canvasWidth - points[0] - HALO) ||
       (points.length >= 2
-        ? points[points.length - 1] - points[0] + radius * 3
-        : radius * 3),
+        ? points[points.length - 1] - points[0] + RADIUS * 3
+        : RADIUS * 3),
   );
   const spanCy = HALO; // button-local vertical center
 </script>
 
-<!--
-  PERF: lines/dots are inline snippets rather than child components — a row with
-  N events renders as plain divs with no per-element component instances.
--->
+<!-- lines/dots are inline snippets, not child components — plain divs, no
+     per-element instances. -->
 {#snippet connector(
-  lx: number,
-  rx: number,
+  leftX: number,
+  rightX: number,
   color: string,
   opts: {
     dashed?: boolean;
@@ -217,27 +195,27 @@
     dim?: number;
   },
 )}
-  {@const box = lineBox([lx, spanCy], [rx, spanCy], sw)}
+  {@const bounds = lineBox([leftX, spanCy], [rightX, spanCy])}
   <div
     class="tl-line absolute"
     class:tl-line--gradient={opts.gradient}
     class:tl-line--dashed={opts.dashed}
     class:tl-line--animate={opts.animate}
-    style="left:{box.left}px;top:{box.top}px;width:{box.width}px;height:{box.height}px;--tl-line-color:{color};{opts.dim
+    style="left:{bounds.left}px;top:{bounds.top}px;width:{bounds.width}px;height:{bounds.height}px;--tl-line-color:{color};{opts.dim
       ? `opacity:${opts.dim};`
       : ''}"
   ></div>
 {/snippet}
 
 {#snippet dot(
-  lx: number,
+  pointX: number,
   colors: DotColors,
   icon: TimelineIconName | undefined,
 )}
-  {@const box = dotBox(lx, spanCy, radius, DOT_STROKE)}
+  {@const bounds = dotBox(pointX, spanCy)}
   <div
     class="absolute h-[var(--dot)] w-[var(--dot)] rounded-[var(--dot-r)] border-2 border-solid"
-    style="left:{box.left}px;top:{box.top}px;border-color:{colors.stroke};background:{colors.fill};"
+    style="left:{bounds.left}px;top:{bounds.top}px;border-color:{colors.stroke};background:{colors.fill};"
   >
     {#if icon}
       <svg
@@ -254,37 +232,41 @@
     class="event"
     aria-label={accessibleName}
     disabled={readOnly}
-    style="left:{spanLeft}px;top:{height / 2 -
-      HALO}px;width:{spanWidth}px;height:{radius * 3}px;"
+    style="left:{spanLeft}px;top:{ROW_HEIGHT / 2 -
+      HALO}px;width:{spanWidth}px;height:{RADIUS * 3}px;"
     onclick={onClick}
   >
     <div
       class="highlight {groupHover({ category: group.category })}"
       style="border-radius:{highlightRadius}px;"
     ></div>
-    {#each points as x, index (index)}
-      {@const lx = x - spanLeft}
+    {#each points as pointX, index (index)}
+      {@const localX = pointX - spanLeft}
       {@const nextPoint = points[index + 1]}
       {#if nextPoint}
-        {@render connector(lx, nextPoint - spanLeft, lineColor, {
+        {@render connector(localX, nextPoint - spanLeft, lineColor, {
           gradient: showRetryGradient,
           dim: scheduling && index === 0 ? 0.35 : undefined,
         })}
       {/if}
       {#if !nextPoint && group.isPending && !pauseTime}
         {@render connector(
-          lx,
-          canvasWidth - gutter - spanLeft,
+          localX,
+          canvasWidth - GUTTER - spanLeft,
           pendingLineColor,
           {
             dashed: true,
             animate: true,
           },
         )}
-        {@render dot(lx, dotColors(group.lastEvent.classification), 'retry')}
+        {@render dot(
+          localX,
+          dotColors(group.lastEvent.classification),
+          'retry',
+        )}
       {/if}
       {@render dot(
-        lx,
+        localX,
         dotColors(group.eventList[index]?.classification),
         pauseTime && index !== 0
           ? 'pause'
@@ -293,10 +275,8 @@
             : CategoryIcon[group.category].name,
       )}
     {/each}
-    <!-- Label lives inside the button so hovering or clicking it applies this
-         row's hover highlight to the dots and activates the same click target.
-         Positioned button-local (offset by spanLeft); it may overflow the
-         button box, which is not clipped. -->
+    <!-- Inside the button so hovering/clicking the label hits the same target;
+         positioned button-local (offset by spanLeft), may overflow the box. -->
     <PayloadSummary
       value={group?.userMetadata?.summary}
       prefix={isActivityTaskScheduledEvent(group.initialEvent)
@@ -346,10 +326,6 @@
 </div>
 
 <style lang="postcss">
-  /* Interactive target: only the dots + connectors between them. Native <button>
-     gives keyboard/focus/Enter/Space for free — no hover/focus JS state. Kept in
-     scoped CSS: the highlight reveal is a descendant rule guarded by :not(:disabled),
-     which doesn't map to clean inline utilities. */
   .event {
     position: absolute;
     margin: 0;
@@ -359,8 +335,7 @@
     cursor: pointer;
     outline: none;
 
-    /* Opt back into pointer events — the .rows layer is pointer-events:none so
-       empty row areas pass clicks through to the collapse toggles below. */
+    /* .rows is pointer-events:none; opt back in so the dots/label are clickable. */
     pointer-events: auto;
   }
 

@@ -7,6 +7,7 @@
   import { isEvent } from '$lib/models/event-history';
   import { eventFilterSort } from '$lib/stores/event-view';
   import type {
+    EventClassification,
     EventTypeCategory,
     WorkflowEventWithPending,
   } from '$lib/types/events';
@@ -16,13 +17,9 @@
     isPendingNexusOperation,
   } from '$lib/utilities/is-pending-activity';
 
-  import {
-    dotColors,
-    getNextDistanceAndOffset,
-    HistoryConfig,
-    isMiddleEvent,
-    strokeColor,
-  } from '../constants';
+  import { dotColors, strokeColor } from '../colors';
+  import { RADIUS, ROW_HEIGHT } from './constants';
+  import { getNextDistanceAndOffset, isMiddleEvent } from './positioning';
 
   interface Props {
     event: WorkflowEventWithPending;
@@ -35,13 +32,18 @@
 
   let { event, group, history, groups, index, canvasWidth }: Props = $props();
 
-  const { height, radius } = HistoryConfig;
-  const strokeWidth = radius / 2;
+  const strokeWidth = RADIUS / 2;
   const DOT_STROKE = 1; // dot border (matches the old Dot usage here)
 
-  const y = $derived(index * height + height / 2);
+  const centerY = $derived(index * ROW_HEIGHT + ROW_HEIGHT / 2);
   const distanceAndOffset = $derived(
-    getNextDistanceAndOffset(history, event, groups, height, $eventFilterSort),
+    getNextDistanceAndOffset(
+      history,
+      event,
+      groups,
+      ROW_HEIGHT,
+      $eventFilterSort,
+    ),
   );
   const nextDistance = $derived(distanceAndOffset.nextDistance);
   const offset = $derived(distanceAndOffset.offset);
@@ -54,7 +56,7 @@
       : event?.classification,
   );
 
-  const horizontalOffset = $derived(offset * 1.75 * radius);
+  const horizontalOffset = $derived(offset * 1.75 * RADIUS);
   const nextIsPending = $derived(
     isEvent(event) && group?.lastEvent.id === event?.id && group?.isPending,
   );
@@ -102,17 +104,20 @@
   );
 </script>
 
-{#snippet dot(point: [number, number], eventClassification?: string | null)}
+{#snippet dot(
+  point: [number, number],
+  eventClassification?: EventClassification | 'pending',
+)}
   {@const colors = dotColors(eventClassification)}
   <rect
     fill={colors.fill}
     stroke={colors.stroke}
     stroke-width={DOT_STROKE}
-    x={point[0] - radius}
-    y={point[1] - radius}
-    width={radius * 2}
-    height={radius * 2}
-    rx={radius * 0.3}
+    x={point[0] - RADIUS}
+    y={point[1] - RADIUS}
+    width={RADIUS * 2}
+    height={RADIUS * 2}
+    rx={RADIUS * 0.3}
   />
 {/snippet}
 
@@ -143,22 +148,22 @@
 <g role="img" aria-label={accessibleName}>
   {#if connectLine}
     {@render line({
-      startPoint: [canvasWidth, y],
-      endPoint: [canvasWidth - horizontalOffset - radius, y],
+      startPoint: [canvasWidth, centerY],
+      endPoint: [canvasWidth - horizontalOffset - RADIUS, centerY],
     })}
   {/if}
   {#if !reverseSort}
-    {@render dot([canvasWidth - horizontalOffset, y], classification)}
+    {@render dot([canvasWidth - horizontalOffset, centerY], classification)}
   {/if}
   {#if zoomNextDistance}
     {@render line({
       startPoint: [
-        canvasWidth - horizontalOffset - radius / 2 + strokeWidth,
-        y + radius + strokeWidth / 2,
+        canvasWidth - horizontalOffset - RADIUS / 2 + strokeWidth,
+        centerY + RADIUS + strokeWidth / 2,
       ],
       endPoint: [
-        canvasWidth - horizontalOffset - radius / 2 + strokeWidth,
-        y + zoomNextDistance + radius,
+        canvasWidth - horizontalOffset - RADIUS / 2 + strokeWidth,
+        centerY + zoomNextDistance + RADIUS,
       ],
       category: group?.pendingActivity
         ? Number(group.pendingActivity.attempt) > 1
@@ -169,7 +174,7 @@
     })}
   {/if}
   {#if reverseSort}
-    {@render dot([canvasWidth - horizontalOffset, y], classification)}
+    {@render dot([canvasWidth - horizontalOffset, centerY], classification)}
   {/if}
 </g>
 

@@ -11,8 +11,8 @@
   import { type ValidTime, validTimeToDate } from '$lib/utilities/format-time';
   import { getFailedOrPendingGroups } from '$lib/utilities/get-failed-or-pending';
 
-  import { TimelineConfig } from '../constants';
   import EndTimeInterval from '../end-time-interval.svelte';
+  import { GUTTER, RADIUS, ROW_HEIGHT } from './constants';
   import {
     getDescStart,
     getPendingBlockY,
@@ -56,43 +56,31 @@
     onTimelineInit,
   }: Props = $props();
 
-  const { height, gutter, radius } = TimelineConfig;
-  const DOT_STROKE = 2; // dot border (matches the SVG Dot default)
-  // Constant dot geometry, published as CSS vars on .canvas so every row's dot
-  // reads them via var() instead of recomputing size/radius inline per event.
-  const dotSize = 2 * radius + DOT_STROKE;
-  const dotRadius = radius * 0.3 + DOT_STROKE / 2;
+  const DOT_STROKE = 2; // dot border
+  // Dot geometry, published as CSS vars on .canvas (consumed by every row's dot).
+  const dotSize = 2 * RADIUS + DOT_STROKE;
+  const dotRadius = RADIUS * 0.3 + DOT_STROKE / 2;
 
   let canvasWidth = $state(0);
 
-  // PERF: bind:clientWidth={canvasWidth} compiled to bind_element_size which reads
-  // element.clientWidth inside a Svelte effect during every reactive flush (~150×
-  // in T4). Each read forces a full synchronous layout of the 40k-row SVG (~3ms
-  // each = 4.2% total CPU). Two fixes combined:
-  //   1. Use contentRect.width from the ResizeObserver callback — the browser
-  //      already computed this, no additional reflow needed.
-  //   2. Debounce via requestAnimationFrame to break any oscillation where a width
-  //      change causes re-renders that change the width again.
+  // Width via ResizeObserver, not bind:clientWidth: the latter reads clientWidth
+  // in every reactive flush, forcing a full sync layout of the tall canvas.
+  // contentRect.width is already computed; RAF-debounced to avoid width↔render loops.
   let containerEl = $state<HTMLDivElement | null>(null);
 
   $effect(() => {
     if (!containerEl) return;
-    // PERF: Use contentRect.width from the ResizeObserver callback — the browser
-    // already computed it during layout, so reading it here forces no extra
-    // reflow (unlike offsetWidth/clientWidth). First callback applies
-    // immediately (no flash); later ones are RAF-debounced to break any
-    // width→re-render→width oscillation.
     let isFirst = true;
     let rafId: ReturnType<typeof requestAnimationFrame>;
     const observer = new ResizeObserver((entries) => {
-      const w = Math.round(entries[0].contentRect.width);
+      const width = Math.round(entries[0].contentRect.width);
       if (isFirst) {
         isFirst = false;
-        canvasWidth = w;
+        canvasWidth = width;
       } else {
         cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
-          canvasWidth = w;
+          canvasWidth = width;
         });
       }
     });
@@ -103,7 +91,7 @@
     };
   });
 
-  const timelineWidth = $derived(canvasWidth - 2 * gutter);
+  const timelineWidth = $derived(canvasWidth - 2 * GUTTER);
 
   let nowMs = $state(Date.now());
 
@@ -126,13 +114,13 @@
   });
 
   const projectX = (time: ValidTime | undefined | null): number => {
-    if (!time) return gutter;
-    return scale.project(validTimeToDate(time).getTime()) + gutter;
+    if (!time) return GUTTER;
+    return scale.project(validTimeToDate(time).getTime()) + GUTTER;
   };
 
   const toggleSegment = (segmentKey: string) => {
     const segment = timeline.segments.find(
-      (s) => s.timespan.key === segmentKey,
+      (candidate) => candidate.timespan.key === segmentKey,
     );
     if (segment) {
       timeline.toggleTimeSegment(segment);
@@ -143,9 +131,8 @@
     getFailedOrPendingGroups(groups, $eventStatusFilter),
   );
 
-  // Skeleton rows: how many unfetched groups remain.
-  // totalExpectedEvents is already a density-adjusted group count (computed in
-  // workflow-timeline-layout) so subtracting filteredGroups.length is correct.
+  // Unfetched skeleton rows. totalExpectedEvents is already a density-adjusted
+  // group count, so subtracting the loaded count is correct.
   const pendingGroupCount = $derived.by(() => {
     if (!loading) return 0;
     if (!totalExpectedEvents) {
@@ -154,68 +141,94 @@
     return Math.max(0, totalExpectedEvents - filteredGroups.length);
   });
 
-  // Scroll-window virtualization: only rows within OVERSCAN rows of the current
-  // viewport are mounted. getWindowBounds maps the visible band → row indices.
-  //
-  // OVERSCAN = 12 rows × 24 px = 288 px buffer per side, so edge rows stay
-  // mounted through small scrolls and direction reversals instead of thrashing
-  // mount/unmount, and rows are ready ahead of a fast fling.
+  // Rows mounted beyond the viewport, so edge rows survive small scrolls and
+  // direction reversals and are ready ahead of a fast fling.
   const OVERSCAN = 12;
 
-  // O(1) closed-form inverse of getRowY for each of the two cursor segments.
-  // Both segments are linear (y = m*i + b), so inverting is pure arithmetic.
-  // Returns [start, end) indices into filteredGroups.
-  function getWindowBounds(
-    sy: number,
-    vp: number,
-    total: number,
-    h: number,
-    os: number,
-    rs: boolean,
-    ds: number,
-    pc: number,
-    tfy: number,
-  ): [number, number] {
-    if (total === 0 || !vp) {
+  // Closed-form inverse of getRowY (both cursor segments are linear) → the
+  // [start, end) row-index range to mount for a given visible band.
+  // Called once per window recompute (~once per frame), not per row — the object
+  // param is free here and keeps the many args readable at the call site.
+  function getWindowBounds({
+    bandTop,
+    bandHeight,
+    total,
+    overscan,
+    reverseSort,
+    descStart,
+    pendingCount,
+    totalForY,
+  }: {
+    bandTop: number;
+    bandHeight: number;
+    total: number;
+    overscan: number;
+    reverseSort: boolean;
+    descStart: number;
+    pendingCount: number;
+    totalForY: number;
+  }): [number, number] {
+    if (total === 0 || !bandHeight) {
       const cap = Math.min(total, 100);
-      return rs ? [Math.max(0, total - cap), total] : [0, cap];
+      return reverseSort ? [Math.max(0, total - cap), total] : [0, cap];
     }
-    const yMin = sy - os * h;
-    const yMax = sy + vp + os * h;
-    let s = total;
-    let e = 0;
-    if (!rs) {
-      // Segment 1 [0, ds): y = (i+2)*h
-      const s1s = Math.max(0, Math.ceil(yMin / h - 2));
-      const s1e = Math.min(ds, Math.floor(yMax / h - 2) + 1);
-      if (s1s < s1e) {
-        s = Math.min(s, s1s);
-        e = Math.max(e, s1e);
+    const yMin = bandTop - overscan * ROW_HEIGHT;
+    const yMax = bandTop + bandHeight + overscan * ROW_HEIGHT;
+    let start = total;
+    let end = 0;
+    if (!reverseSort) {
+      // Segment 1 [0, descStart): y = (i+2)*ROW_HEIGHT
+      const seg1Start = Math.max(0, Math.ceil(yMin / ROW_HEIGHT - 2));
+      const seg1End = Math.min(
+        descStart,
+        Math.floor(yMax / ROW_HEIGHT - 2) + 1,
+      );
+      if (seg1Start < seg1End) {
+        start = Math.min(start, seg1Start);
+        end = Math.max(end, seg1End);
       }
-      // Segment 2 [ds, N): y = (i+2+pc)*h
-      const s2s = Math.max(ds, Math.ceil(yMin / h - 2 - pc));
-      const s2e = Math.min(total, Math.floor(yMax / h - 2 - pc) + 1);
-      if (s2s < s2e) {
-        s = Math.min(s, s2s);
-        e = Math.max(e, s2e);
+      // Segment 2 [descStart, N): y = (i+2+pendingCount)*ROW_HEIGHT
+      const seg2Start = Math.max(
+        descStart,
+        Math.ceil(yMin / ROW_HEIGHT - 2 - pendingCount),
+      );
+      const seg2End = Math.min(
+        total,
+        Math.floor(yMax / ROW_HEIGHT - 2 - pendingCount) + 1,
+      );
+      if (seg2Start < seg2End) {
+        start = Math.min(start, seg2Start);
+        end = Math.max(end, seg2End);
       }
     } else {
-      // Segment 1 [0, ds): y = (tfy+1-i)*h  → i = tfy+1 - y/h
-      const s1s = Math.max(0, Math.ceil(tfy + 1 - yMax / h));
-      const s1e = Math.min(ds, Math.floor(tfy + 1 - yMin / h) + 1);
-      if (s1s < s1e) {
-        s = Math.min(s, s1s);
-        e = Math.max(e, s1e);
+      // Segment 1 [0, descStart): i = totalForY+1 - y/ROW_HEIGHT
+      const seg1Start = Math.max(
+        0,
+        Math.ceil(totalForY + 1 - yMax / ROW_HEIGHT),
+      );
+      const seg1End = Math.min(
+        descStart,
+        Math.floor(totalForY + 1 - yMin / ROW_HEIGHT) + 1,
+      );
+      if (seg1Start < seg1End) {
+        start = Math.min(start, seg1Start);
+        end = Math.max(end, seg1End);
       }
-      // Segment 2 [ds, N): y = (tfy+1-i-pc)*h → i = tfy+1-pc - y/h
-      const s2s = Math.max(ds, Math.ceil(tfy + 1 - pc - yMax / h));
-      const s2e = Math.min(total, Math.floor(tfy + 1 - pc - yMin / h) + 1);
-      if (s2s < s2e) {
-        s = Math.min(s, s2s);
-        e = Math.max(e, s2e);
+      // Segment 2 [descStart, N): i = totalForY+1-pendingCount - y/ROW_HEIGHT
+      const seg2Start = Math.max(
+        descStart,
+        Math.ceil(totalForY + 1 - pendingCount - yMax / ROW_HEIGHT),
+      );
+      const seg2End = Math.min(
+        total,
+        Math.floor(totalForY + 1 - pendingCount - yMin / ROW_HEIGHT) + 1,
+      );
+      if (seg2Start < seg2End) {
+        start = Math.min(start, seg2Start);
+        end = Math.max(end, seg2End);
       }
     }
-    return s >= e ? [0, 0] : [s, e];
+    return start >= end ? [0, 0] : [start, end];
   }
 
   const firstStartTime = $derived.by(() => {
@@ -238,9 +251,8 @@
     new Map(filteredGroups.map((g, i) => [g.id, i])),
   );
 
-  // PERF: Index of the currently active group in filteredGroups (-1 = none).
-  // Derived here so only the two rendering sections below subscribe to
-  // $activeGroups, not the main row {#each}.
+  // Active group's index in filteredGroups (-1 = none). Derived here so the row
+  // pool doesn't subscribe to $activeGroups directly.
   const activeIdx = $derived(
     $activeGroups.length > 0 ? (groupIndexMap.get($activeGroups[0]) ?? -1) : -1,
   );
@@ -249,11 +261,8 @@
     if ($activeGroups.length === 0) panelHeight = 0;
   });
 
-  // PERF SORT: reverseSort flips which side of activeIdx the panel shift applies
-  // to. Ascending: rows AFTER the active one (i > idx) move down. Descending:
-  // rows BEFORE it (i < idx) are visually below the panel and move down instead.
-  // Pooled rows are few and stable, so computing this per slot in the template
-  // is cheap — no imperative element map needed.
+  // Open detail panel pushes rows below the active one down by panelHeight.
+  // reverseSort flips "below" to i < activeIdx.
   function shiftFor(i: number): string {
     if (activeIdx < 0 || panelHeight === 0) return '';
     const shifted = reverseSort ? i < activeIdx : i > activeIdx;
@@ -268,55 +277,45 @@
     getTotalForY(filteredGroups.length, pendingGroupCount, descStart),
   );
 
-  // The open detail panel shifts every row below it down by panelHeight (via a
-  // transform), but getWindowBounds maps y → rows using the unshifted getRowY.
-  // Widen the mount window by the panel's row span so those shifted rows stay
-  // mounted instead of leaving a blank band under the panel.
-  const windowOverscan = $derived(OVERSCAN + Math.ceil(panelHeight / height));
+  // Widen the mount window by the panel's row span: shiftFor moves rows down but
+  // getWindowBounds maps on the unshifted y, so without this they'd leave a blank.
+  const windowOverscan = $derived(
+    OVERSCAN + Math.ceil(panelHeight / ROW_HEIGHT),
+  );
 
-  // Full drawn height of the timeline (rows + axis + detail panel). The SVG is
-  // this tall plus a label zone and scrolls with the page — there is no
-  // translateY; the page itself pans it.
+  // Full drawn height (rows + axis + detail panel). The container is this tall and
+  // scrolls with the page.
   const timelineHeight = $derived(
-    Math.max(height * (filteredGroups.length + pendingGroupCount + 2), 120) +
-      panelHeight,
+    Math.max(
+      ROW_HEIGHT * (filteredGroups.length + pendingGroupCount + 2),
+      120,
+    ) + panelHeight,
   );
   const AXIS_LABEL_ZONE = 150;
   const svgHeight = $derived(timelineHeight + AXIS_LABEL_ZONE);
 
   // ── Scroll-driven virtualization ────────────────────────────────────────────
-  // The timeline scrolls inside an overflow ancestor (#content-wrapper). We read
-  // the container's offset within that scroller on each scroll frame to get the
-  // visible pixel band, then feed it to getWindowBounds (asc/desc/pending aware)
-  // so only rows in view (+ overscan) mount.
-  //
-  // This deliberately does NOT use IntersectionObserver: the browser batches IO
-  // callbacks during fast scroll (in one trace: 36 callbacks for 408 scroll
-  // updates), so the mounted window trailed the viewport and rows only appeared
-  // once scrolling slowed. A per-frame getBoundingClientRect read stays locked
-  // to the viewport instead.
+  // Each frame we read the container's offset within its scroll parent to get the
+  // visible pixel band, which getWindowBounds turns into a row range. Not
+  // IntersectionObserver: the browser drops IO callbacks during fast scroll, so
+  // the window trailed the viewport and rows blanked until it settled.
   let visibleBand = $state<[number, number] | null>(null);
   let scroller: HTMLElement | null = null;
   let bandRafId: ReturnType<typeof requestAnimationFrame> | undefined;
   let lastTop = NaN;
   let lastHeight = NaN;
   let stableFrames = 0;
-  // ~8 frames (~130ms) of no movement before the sampling loop stops.
-  const STABLE_FRAMES = 8;
+  const STABLE_FRAMES = 8; // still frames before the sampling loop idles out
 
-  // Sample the viewport offset every frame while scrolling, rather than once per
-  // scroll event. A wheel/trackpad fling fires `wheel` events but coalesces (or
-  // drops) `scroll` events for the duration — so a scroll-event-driven measure
-  // goes stale mid-fling and rows blank out until it settles. A self-driven rAF
-  // loop reads the real position each frame regardless of which events fire.
+  // Self-driven rAF loop, not a per-scroll-event measure: a wheel fling fires
+  // `wheel` but coalesces `scroll`, so an event-driven measure goes stale mid-fling.
   function sampleBand() {
     bandRafId = undefined;
     if (!containerEl) return;
     const elTop = containerEl.getBoundingClientRect().top;
     const viewTop = scroller ? scroller.getBoundingClientRect().top : 0;
     const viewHeight = scroller ? scroller.clientHeight : window.innerHeight;
-    // Container-local coordinate aligned with the top of the visible area.
-    const top = viewTop - elTop;
+    const top = viewTop - elTop; // container-local top of the visible area
 
     if (top !== lastTop || viewHeight !== lastHeight) {
       lastTop = top;
@@ -327,8 +326,7 @@
       stableFrames++;
     }
 
-    // Keep sampling until the position has held still for STABLE_FRAMES, then
-    // idle out. Any scroll/wheel/touch event pokes it back to life.
+    // Loop while moving; idle out once still. pokeSampler restarts it on activity.
     if (stableFrames < STABLE_FRAMES) {
       bandRafId = requestAnimationFrame(sampleBand);
     }
@@ -376,46 +374,43 @@
 
   const [windowStart, windowEnd] = $derived.by(() => {
     const band = visibleBand;
-    const top = band ? band[0] : 0;
+    const bandTop = band ? band[0] : 0;
     const bandHeight = band ? band[1] - band[0] : Math.min(svgHeight, 1000);
-    return getWindowBounds(
-      top,
+    return getWindowBounds({
+      bandTop,
       bandHeight,
-      filteredGroups.length,
-      height,
-      windowOverscan,
+      total: filteredGroups.length,
+      overscan: windowOverscan,
       reverseSort,
       descStart,
-      pendingGroupCount,
+      pendingCount: pendingGroupCount,
       totalForY,
-    );
+    });
   });
 
   // ── Row pool ────────────────────────────────────────────────────────────────
-  // A FIXED-size set of row slots reused across scroll instead of a keyed each
-  // that creates/destroys rows as the window slides. During scroll the pool size
-  // is stable (band height is constant), so slots keep their DOM + component
-  // instance and only re-point to a new group — no cloneNode/insert/teardown and
-  // far less allocation, which was tripping frequent major GC pauses.
+  // Fixed-size set of slots reused across scroll (vs a keyed each that creates/
+  // destroys rows as the window slides). Slots keep their DOM + instance and just
+  // re-point to a new group — avoids the mount churn that caused major-GC pauses.
   const POOL_SLACK = 4;
   const poolSize = $derived.by(() => {
     const band = visibleBand;
     const bandHeight = band ? band[1] - band[0] : Math.min(svgHeight, 1000);
-    return Math.ceil(bandHeight / height) + 2 * windowOverscan + POOL_SLACK;
+    return Math.ceil(bandHeight / ROW_HEIGHT) + 2 * windowOverscan + POOL_SLACK;
   });
 
-  // Slot p shows filteredGroups[windowStart + p], or null past the window/list.
-  // poolSize ≥ (windowEnd − windowStart) by construction, so every visible row
-  // has a slot. New {i, group} objects per derive are cheap (~poolSize of them);
-  // the each is keyed by slot index so the DOM stays put.
+  // Slot n shows filteredGroups[windowStart + n], or null past the window/list.
+  // Keyed by slot index (below) so the DOM stays put; poolSize ≥ window span.
   const pool = $derived.by(() => {
     const start = windowStart;
     const total = filteredGroups.length;
-    const slots: ({ i: number; group: EventGroups[number] } | null)[] = [];
-    for (let p = 0; p < poolSize; p++) {
-      const i = start + p;
+    const slots: ({ index: number; group: EventGroups[number] } | null)[] = [];
+    for (let slot = 0; slot < poolSize; slot++) {
+      const index = start + slot;
       slots.push(
-        i < windowEnd && i < total ? { i, group: filteredGroups[i] } : null,
+        index < windowEnd && index < total
+          ? { index, group: filteredGroups[index] }
+          : null,
       );
     }
     return slots;
@@ -429,7 +424,6 @@
           pendingGroupCount,
           totalForY,
           reverseSort,
-          height,
         }),
   );
 
@@ -461,49 +455,41 @@
         </p>
       </div>
     </div>
-    <!--
-      HTML canvas: a tall positioned layer the page scrolls. Rows/lines/dots are
-      plain absolutely-positioned divs; IntersectionObserver decides which rows
-      mount, so only windowed rows exist in the DOM despite the canvas being tall.
-    -->
+    <!-- Tall scrolled layer; rows/lines/dots are absolutely-positioned divs,
+         only the windowed slots exist in the DOM. -->
     <div
       class="canvas"
       style="width:{canvasWidth}px;height:{svgHeight}px;--dot:{dotSize}px;--dot-r:{dotRadius}px;"
     >
-      <!--
-        Icon symbol sheet: one hidden <svg> holding every <symbol>. Each icon in
-        the tree is a tiny <svg><use href="#ti-…"></svg> — native instancing,
-        no {#if} branching, no innerHTML parsing, no repeated path data.
-      -->
+      <!-- Hidden symbol sheet; each icon is a <svg><use href="#ti-…"> instance. -->
       <svg class="icon-defs" aria-hidden="true"><TimelineIconDefs /></svg>
 
       <!-- Border rails -->
       <div
         class="rail"
-        style="left:{gutter - radius / 4}px;top:{lineTop}px;width:{radius /
+        style="left:{GUTTER - RADIUS / 4}px;top:{lineTop}px;width:{RADIUS /
           2}px;height:{lineBottom}px;"
       ></div>
       <div
         class="rail"
         style="left:{canvasWidth -
-          gutter -
-          radius / 4}px;top:{lineTop}px;width:{radius /
+          GUTTER -
+          RADIUS / 4}px;top:{lineTop}px;width:{RADIUS /
           2}px;height:{lineBottom}px;"
       ></div>
 
       <TimelineAxis
-        x1={gutter - radius / 4}
-        x2={canvasWidth - gutter + radius / 4}
-        {gutter}
+        x1={GUTTER - RADIUS / 4}
+        x2={canvasWidth - GUTTER + RADIUS / 4}
+        gutter={GUTTER}
         {timelineHeight}
         {startTime}
         {scale}
       />
-      <WorkflowRow {workflow} y={height} length={canvasWidth} />
+      <WorkflowRow {workflow} y={ROW_HEIGHT} length={canvasWidth} />
       {#if !loading}
-        <!-- Collapsed segment coords are 0-based; the +gutter offset the SVG got
-             from translate(gutter,0) is provided by this anchor's left. -->
-        <div class="collapsed-layer" style="left:{gutter}px;">
+        <!-- Anchor's left provides the gutter offset for the layer's 0-based coords. -->
+        <div class="collapsed-layer" style="left:{GUTTER}px;">
           <TimelineCollapsedLayer
             {scale}
             {timelineHeight}
@@ -513,21 +499,14 @@
         </div>
       {/if}
 
-      <!--
-        POOLED ROWS: the each is keyed by slot INDEX (stable 0..poolSize-1), so
-        Svelte never creates/destroys/reorders these <li>s during scroll — it
-        just updates each slot's group + top in place. The <li> stays mounted
-        even when its slot is null (past the list edge); only the inner row is
-        conditionally rendered, so mid-list scrolling causes zero component
-        churn. top comes from getRowY (asc formula or descending mirror), and
-        shiftFor applies the open-panel offset per slot.
-      -->
+      <!-- Keyed by slot index so Svelte reuses the <li>s in place; the <li>
+           persists when its slot is null, only the inner row toggles. -->
       <ul class="rows">
-        {#each pool as slot, p (p)}
+        {#each pool as slot, slotIndex (slotIndex)}
           <li
             class="row-anchor"
             style={slot
-              ? `top:${getY(slot.i) - height / 2}px;height:${height}px;${shiftFor(slot.i)}`
+              ? `top:${getY(slot.index) - ROW_HEIGHT / 2}px;height:${ROW_HEIGHT}px;${shiftFor(slot.index)}`
               : 'display:none;'}
           >
             {#if slot}
@@ -548,33 +527,27 @@
           descStart,
           filteredGroupsLength: filteredGroups.length,
           reverseSort,
-          height,
-          radius,
         })}
-        {@const rectH = pendingGroupCount * height + radius}
+        {@const rectH = pendingGroupCount * ROW_HEIGHT + RADIUS}
         <div
           class="skeleton animate-pulse rounded bg-slate-400/30"
-          style="left:{gutter}px;top:{rectY}px;width:{canvasWidth -
-            gutter * 2}px;height:{rectH}px;"
+          style="left:{GUTTER}px;top:{rectY}px;width:{canvasWidth -
+            GUTTER * 2}px;height:{rectH}px;"
         ></div>
       {/if}
 
-      <!--
-        Details panel is the last child (paints above rows). onHeight reports the
-        real panel height so the transform $effect shifts rows below it. Only
-        panelHeight changes — no row attributes touched.
-      -->
+      <!-- Last child so it paints above rows; onHeight feeds shiftFor. -->
       {#if !readOnly && activeIdx >= 0}
-        {@const grp = filteredGroups[activeIdx]}
-        {#if grp}
-          {@const panelY = getY(activeIdx) + 1.33 * radius}
+        {@const activeGroup = filteredGroups[activeIdx]}
+        {#if activeGroup}
+          {@const panelY = getY(activeIdx) + 1.33 * RADIUS}
           <GroupDetailsRow
             y={panelY}
-            group={grp}
+            group={activeGroup}
             {canvasWidth}
             endTime={workflow?.endTime ? endTime : nowMs}
-            onHeight={(h) => {
-              panelHeight = h;
+            onHeight={(height) => {
+              panelHeight = height;
             }}
           />
         {/if}
@@ -584,11 +557,8 @@
 </div>
 
 <style lang="postcss">
-  /* In-flow (like the old <svg>) so the sticky start/end labels float over it;
-     -mt-4 tucks it under the controls border. Positioned so the absolutely
-     placed rows/axis resolve against it. color drives currentColor for the
-     rails, axis baseline, grid lines, tick labels and currentColor-fallback row
-     labels, so it must be theme-aware — a hardcoded white only reads on dark. */
+  /* color drives currentColor for the rails, axis, grid lines, tick labels and
+     fallback row labels, so it must be theme-aware (white only reads on dark). */
   .canvas {
     position: relative;
     margin-top: -1rem;
@@ -608,17 +578,13 @@
     background: currentColor;
   }
 
-  /* Zero-size anchor: shifts the collapsed layer's 0-based coords by the gutter,
-     mirroring the SVG translate(gutter, 0). */
   .collapsed-layer {
     position: absolute;
     top: 0;
   }
 
-  /* The rows layer covers the whole canvas and paints above the collapsed
-     layer, so make it pointer-transparent — only the event buttons opt back in
-     (pointer-events:auto) — otherwise it would swallow clicks meant for the
-     collapse toggles underneath. */
+  /* pointer-transparent so clicks fall through to the collapse toggles below;
+     the event buttons opt back in with pointer-events:auto. */
   .rows {
     position: absolute;
     inset: 0;
@@ -638,11 +604,9 @@
     position: absolute;
   }
 
-  /* Connector-line styles for both row components (timeline-graph-row,
-     workflow-row). They render `.tl-line` divs in child components, so the
-     rules are :global — but namespaced under this component's scoped `.canvas`
-     so they don't leak. Each element sets only its geometry + --tl-line-color
-     inline; these carry the rest. border-radius: 9999px → pill ends. */
+  /* Connector-line styles for the row components' `.tl-line` divs; :global since
+     they're in children, scoped under .canvas so they don't leak. Elements set
+     geometry + --tl-line-color inline. border-radius: 9999px → pill ends. */
   .canvas :global(.tl-line) {
     border-radius: 9999px;
     background-color: var(--tl-line-color);
@@ -666,8 +630,7 @@
     animation: tl-line-dash 60s linear infinite;
   }
 
-  /* -global- so the name isn't scope-hashed; the :global rule above references
-     it by its plain name. */
+  /* -global- so the name isn't scope-hashed. */
   @keyframes -global-tl-line-dash {
     from {
       background-position-x: 200px;

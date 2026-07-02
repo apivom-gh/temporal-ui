@@ -3,7 +3,7 @@
   import { translate } from '$lib/i18n/translate';
   import { formatDistanceAbbreviated } from '$lib/utilities/format-time';
 
-  import { TimelineConfig } from '../constants';
+  import { RADIUS, ROW_HEIGHT } from './constants';
 
   import type { TimelineScale } from './timeline-scale.svelte';
 
@@ -15,14 +15,12 @@
   };
   let { scale, timelineHeight, readOnly = false, onToggle }: Props = $props();
 
-  const { radius, height } = TimelineConfig;
-
   const ZIGZAG_HALF_WIDTH = 5;
   const ZIGZAG_STEP = 8;
 
-  const HIT_HALF_WIDTH = Math.max(radius, 12);
+  const HIT_HALF_WIDTH = Math.max(RADIUS, 12);
   const HIT_WIDTH = HIT_HALF_WIDTH * 2;
-  const iconSize = radius * 2;
+  const iconSize = RADIUS * 2;
 
   const collapsibleSegments = $derived(
     scale.segments.filter((s) => s.isCollapsible),
@@ -34,15 +32,15 @@
   };
 </script>
 
-{#snippet marker(cx: number, cy: number)}
+{#snippet marker(centerX: number, centerY: number)}
   <div
     class="marker"
-    style="left:{cx - HIT_HALF_WIDTH}px;top:{cy -
-      radius}px;width:{HIT_WIDTH}px;height:{radius * 2}px;"
+    style="left:{centerX - HIT_HALF_WIDTH}px;top:{centerY -
+      RADIUS}px;width:{HIT_WIDTH}px;height:{RADIUS * 2}px;"
   ></div>
   <div
     class="marker-icon"
-    style="left:{cx - iconSize / 2}px;top:{cy -
+    style="left:{centerX - iconSize / 2}px;top:{centerY -
       iconSize / 2}px;width:{iconSize}px;height:{iconSize}px;"
   >
     <Icon
@@ -56,15 +54,14 @@
 
 {#each collapsibleSegments as seg (seg.key)}
   {@const labelX = (seg.startPx + seg.endPx) / 2}
-  {@const labelY = timelineHeight + radius * 2}
+  {@const labelY = timelineHeight + RADIUS * 2}
   {@const distance = formatDistanceAbbreviated({
     start: new Date(seg.startTimeMs),
     end: new Date(seg.endTimeMs),
   })}
   {#if seg.isCollapsed}
     {@const half = Math.min(ZIGZAG_HALF_WIDTH, (seg.endPx - seg.startPx) / 4)}
-    <!-- Full-height zigzag: one tiled <pattern> of a single period, rasterized
-         once by the browser rather than an O(timelineHeight) polyline. -->
+    <!-- Full-height zigzag as a tiled <pattern> (rasterized once, not a long polyline). -->
     <svg
       class="zigzag"
       style="left:{labelX - half}px;top:0;width:{half *
@@ -94,7 +91,7 @@
         fill="url(#zigzag-{seg.key})"
       />
     </svg>
-    {@render marker(labelX, height)}
+    {@render marker(labelX, ROW_HEIGHT)}
     {@render marker(labelX, timelineHeight)}
     <div class="zigzag-label" style="left:{labelX}px;top:{labelY}px;">
       {distance}

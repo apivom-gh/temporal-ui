@@ -5,8 +5,8 @@ import type {
 import { maxDate, validTimeToDate } from '$lib/utilities/format-time';
 import { isNotNullish, isNullish } from '$lib/utilities/type-predicates';
 
-import { Timespan } from '../timespan';
-import type { TimeSegment } from '../types';
+import { Timespan } from './timespan';
+import type { TimeSegment } from './types';
 
 function getGroupStartMs(group: EventGroup): number | null {
   const { eventTime } = group.initialEvent;

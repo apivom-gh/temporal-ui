@@ -2,7 +2,7 @@
   import type { Timestamp } from '$lib/types';
   import { formatDistanceAbbreviated } from '$lib/utilities/format-time';
 
-  import { TimelineConfig } from '../constants';
+  import { RADIUS } from './constants';
 
   import type { TimelineScale } from './timeline-scale.svelte';
 
@@ -23,8 +23,6 @@
     scale,
   }: Props = $props();
 
-  const { radius } = TimelineConfig;
-
   const TARGET_TICK_PX = 60;
   const MIN_TICKS = 2;
   const MAX_TICKS = 40;
@@ -42,9 +40,8 @@
   const endMs = $derived(scale.unproject(x2 - gutter));
   const includeMilliseconds = $derived((endMs - startMs) / tickCount < 1000);
 
-  // Collapsed segments compress a large span into a fixed sliver, so a tick
-  // inside one would show a misleading label and collide with the collapse
-  // marker/zigzag. Skip grid + labels within them.
+  // Skip ticks inside collapsed segments — they'd show misleading labels and
+  // collide with the collapse marker.
   const collapsedRanges = $derived(
     scale.segments
       .filter((segment) => segment.isCollapsed)
@@ -57,15 +54,14 @@
   const isInsideCollapsed = (x: number): boolean =>
     collapsedRanges.some((range) => x >= range.startX && x <= range.endX);
 
-  // Tick x positions (skip i=0, that's the rail). Each becomes a dotted vertical
-  // grid line + a rotated label unless it falls inside a collapsed range.
+  // Tick x positions (skip i=0, the rail; skip any inside a collapsed range).
   const ticks = $derived(
     Array.from({ length: tickCount }, (_, i) => x1 + i * tickDistance).filter(
       (x, i) => i !== 0 && !isInsideCollapsed(x),
     ),
   );
 
-  const baselineWidth = radius / 2;
+  const baselineWidth = RADIUS / 2;
 </script>
 
 <!-- baseline -->
@@ -82,7 +78,7 @@
   ></div>
   <div
     class="tick-label"
-    style="left:{tickX}px;top:{timelineHeight + radius}px;"
+    style="left:{tickX}px;top:{timelineHeight + RADIUS}px;"
   >
     {formatDistanceAbbreviated({
       start: startTime,

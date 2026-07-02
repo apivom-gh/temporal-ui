@@ -7,9 +7,9 @@ import { isWorkflowDelayed } from '$lib/utilities/delayed-workflows';
 import { validTimeToDate } from '$lib/utilities/format-time';
 import { isNotNullish } from '$lib/utilities/type-predicates';
 
+import { buildTimeSegments } from './build-time-segments';
 import { Timespan } from './timespan';
 import type { TimeSegment, TimeSegmentKey } from './types';
-import { buildTimeSegments } from './utils/build-time-segments';
 
 const DEFAULT_DURATION_THRESHOLD_RATIO = 0.1;
 
@@ -56,8 +56,7 @@ export class Timeline {
   });
 
   private readonly _startMs = $derived.by(() => {
-    // Event history is ordered ascending by event time, so the earliest event
-    // is the first entry — no need to map and scan the whole array.
+    // History is ascending by time, so the earliest event is the first entry.
     const firstEventTime = this._getFullEventHistory()[0]?.eventTime;
 
     const startCandidates = [
@@ -81,10 +80,8 @@ export class Timeline {
     return Math.min(validTimeToDate(start).getTime(), this._endMs);
   });
 
-  // Split into primitive deriveds so the Timespan is only reconstructed when a
-  // boundary actually changes. Streaming in more events reruns _startMs (O(1)),
-  // but an unchanged number won't propagate, so segments and everything
-  // downstream stay cached.
+  // Primitive-number deriveds above so the Timespan (and everything downstream)
+  // only rebuilds when a boundary actually changes, not on every streamed event.
   readonly workflowTimespan = $derived.by(
     () =>
       new Timespan(this._startMs, this._endMs, {
@@ -99,11 +96,9 @@ export class Timeline {
     });
   });
 
-  // Uses raw set membership, not isTimeSegmentCollapsed, for two reasons:
-  // isTimeSegmentCollapsible reads expandedDurationMs, so the guarded check
-  // would be circular; and excluding every intended-collapsed segment (even
-  // ones temporarily too small to collapse) keeps the denominator stable so
-  // expanding one large gap can't cascade borderline gaps open.
+  // Raw set membership (not isTimeSegmentCollapsed): the guarded check reads this
+  // value so it'd be circular, and using raw membership keeps the denominator
+  // stable so expanding one gap can't cascade borderline gaps open.
   readonly expandedDurationMs = $derived.by(() =>
     this.segments.reduce(
       (sum, segment) =>
@@ -177,12 +172,10 @@ export class Timeline {
   }
 
   private _collapseAllSegments(): void {
-    // purposefully not setting this._hasUserToggled = true
-    // here. Only public facing methods should set flag.
+    // Doesn't set _hasUserToggled — only public methods do.
+    // Loops because collapsing shrinks expandedDurationMs, which can push more
+    // segments past the threshold.
     let collapsed = true;
-
-    // This is a while loop because collapsing segments shrinks the expanded
-    // duration, which can push additional segments past the threshold.
     while (collapsed) {
       collapsed = false;
       for (const segment of this.segments) {
