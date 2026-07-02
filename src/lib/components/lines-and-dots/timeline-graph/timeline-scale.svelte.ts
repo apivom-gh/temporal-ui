@@ -14,26 +14,26 @@ export interface ScaledSegment {
 const DEFAULT_COLLAPSED_WIDTH_PX = 48;
 
 export class TimelineScale {
-  #timeline: Timeline;
-  #viewport: Viewport;
-  #getCollapsedPx: () => number;
+  private _timeline: Timeline;
+  private _viewport: Viewport;
+  private _getCollapsedPx: () => number;
 
   constructor(init: {
     timeline: Timeline;
     viewport: Viewport;
     getCollapsedPx?: () => number;
   }) {
-    this.#timeline = init.timeline;
-    this.#viewport = init.viewport;
-    this.#getCollapsedPx =
+    this._timeline = init.timeline;
+    this._viewport = init.viewport;
+    this._getCollapsedPx =
       init.getCollapsedPx ?? (() => DEFAULT_COLLAPSED_WIDTH_PX);
   }
 
   readonly segments = $derived.by<ScaledSegment[]>(() =>
     buildScaledSegments({
-      timeline: this.#timeline,
-      widthPx: this.#viewport.widthPx,
-      collapsedPx: this.#getCollapsedPx(),
+      timeline: this._timeline,
+      widthPx: this._viewport.widthPx,
+      collapsedPx: this._getCollapsedPx(),
     }),
   );
 
@@ -54,17 +54,14 @@ export class TimelineScale {
       return last.endPx;
     }
 
-    for (const segment of segments) {
-      if (timeMs > segment.endTimeMs) {
-        continue;
-      }
-
-      const durationMs = segment.endTimeMs - segment.startTimeMs || 1;
-      const ratio = (timeMs - segment.startTimeMs) / durationMs;
-      return segment.startPx + ratio * (segment.endPx - segment.startPx);
-    }
-
-    return last.endPx;
+    // Segments are contiguous and time-sorted, so binary search the first
+    // segment whose end is at/after timeMs instead of scanning them all
+    // (project runs per event point on every row that mounts during scroll).
+    const segment =
+      segments[firstIndexReaching(segments, (s) => s.endTimeMs, timeMs)];
+    const durationMs = segment.endTimeMs - segment.startTimeMs || 1;
+    const ratio = (timeMs - segment.startTimeMs) / durationMs;
+    return segment.startPx + ratio * (segment.endPx - segment.startPx);
   }
 
   unproject(px: number): number {
@@ -84,20 +81,33 @@ export class TimelineScale {
       return last.endTimeMs;
     }
 
-    for (const segment of segments) {
-      if (px > segment.endPx) {
-        continue;
-      }
-
-      const widthPx = segment.endPx - segment.startPx || 1;
-      const ratio = (px - segment.startPx) / widthPx;
-      return (
-        segment.startTimeMs + ratio * (segment.endTimeMs - segment.startTimeMs)
-      );
-    }
-
-    return last.endTimeMs;
+    const segment = segments[firstIndexReaching(segments, (s) => s.endPx, px)];
+    const widthPx = segment.endPx - segment.startPx || 1;
+    const ratio = (px - segment.startPx) / widthPx;
+    return (
+      segment.startTimeMs + ratio * (segment.endTimeMs - segment.startTimeMs)
+    );
   }
+}
+
+// First index whose accessor value is >= target. Assumes the accessor is
+// non-decreasing across segments (true for both endTimeMs and endPx).
+function firstIndexReaching(
+  segments: ScaledSegment[],
+  end: (segment: ScaledSegment) => number,
+  target: number,
+): number {
+  let lo = 0;
+  let hi = segments.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (end(segments[mid]) < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }
 
 function buildScaledSegments({

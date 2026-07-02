@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { SvelteSet } from 'svelte/reactivity';
-
   import { twMerge } from 'tailwind-merge';
 
   import { timestamp } from '$lib/components/timestamp.svelte';
@@ -15,7 +13,6 @@
 
   import { TimelineConfig } from '../constants';
   import EndTimeInterval from '../end-time-interval.svelte';
-  import Line from '../svg/line.svelte';
   import TimelineIconDefs from '../svg/timeline-icon-defs.svelte';
   import {
     getDescStart,
@@ -24,18 +21,16 @@
     getTotalForY,
   } from '../svg/timeline-positioning';
 
-  import GroupDetailsRow from './group-details-row.svelte';
-  import TimelineAxis from './timeline-axis.svelte';
-  import TimelineCollapsedLayer from './timeline-collapsed-layer.svelte';
-  import TimelineGraphRow from './timeline-graph-row.svelte';
+  import GroupDetailsRow from './html/group-details-row.svelte';
+  import TimelineAxis from './html/timeline-axis.svelte';
+  import TimelineCollapsedLayer from './html/timeline-collapsed-layer.svelte';
+  import TimelineGraphRow from './html/timeline-graph-row.svelte';
+  import WorkflowRow from './html/workflow-row.svelte';
   import { TimelineScale } from './timeline-scale.svelte';
   import { Timeline } from './timeline.svelte';
   import { Viewport } from './viewport.svelte';
-  import WorkflowRow from './workflow-row.svelte';
 
   interface Props {
-    x?: number;
-    y?: number;
     workflow: WorkflowExecution;
     groups: EventGroups;
     readOnly?: boolean;
@@ -49,8 +44,6 @@
   }
 
   let {
-    x = 0,
-    y = 0,
     workflow,
     groups,
     readOnly = false,
@@ -64,6 +57,11 @@
   }: Props = $props();
 
   const { height, gutter, radius } = TimelineConfig;
+  const DOT_STROKE = 2; // dot border (matches the SVG Dot default)
+  // Constant dot geometry, published as CSS vars on .canvas so every row's dot
+  // reads them via var() instead of recomputing size/radius inline per event.
+  const dotSize = 2 * radius + DOT_STROKE;
+  const dotRadius = radius * 0.3 + DOT_STROKE / 2;
 
   let canvasWidth = $state(0);
 
@@ -156,13 +154,13 @@
     return Math.max(0, totalExpectedEvents - filteredGroups.length);
   });
 
-  // Scroll-window virtualization: only the rows within OVERSCAN rows of the
-  // current viewport are mounted in the SVG DOM. The SVG viewBox handles
-  // per-frame visual panning; this derived controls which <g> elements exist.
+  // Scroll-window virtualization: only rows within OVERSCAN rows of the current
+  // viewport are mounted. getWindowBounds maps the visible band → row indices.
   //
-  // OVERSCAN = 8 rows × 24 px = 192 px buffer per side. Rows are cheap
-  // (icon + text only, no long connector lines) so a small buffer is enough.
-  const OVERSCAN = 8;
+  // OVERSCAN = 12 rows × 24 px = 288 px buffer per side, so edge rows stay
+  // mounted through small scrolls and direction reversals instead of thrashing
+  // mount/unmount, and rows are ready ahead of a fast fling.
+  const OVERSCAN = 12;
 
   // O(1) closed-form inverse of getRowY for each of the two cursor segments.
   // Both segments are linear (y = m*i + b), so inverting is pure arithmetic.
@@ -251,63 +249,16 @@
     if ($activeGroups.length === 0) panelHeight = 0;
   });
 
-  // PERF IMPERATIVE TRANSFORM APPROACH:
-  // A plain Map of group-id → SVG <g> wrapper element, populated by the
-  // use:registerRow action on each row. Not reactive — Svelte never observes
-  // this Map, so registering/deregistering rows causes no reactive cascade.
-  // eslint-disable-next-line svelte/prefer-svelte-reactivity
-  const rowWrappers = new Map<string, SVGGElement>();
-
-  function registerRow(el: SVGGElement, id: string) {
-    rowWrappers.set(id, el);
-    return {
-      destroy() {
-        rowWrappers.delete(id);
-      },
-    };
+  // PERF SORT: reverseSort flips which side of activeIdx the panel shift applies
+  // to. Ascending: rows AFTER the active one (i > idx) move down. Descending:
+  // rows BEFORE it (i < idx) are visually below the panel and move down instead.
+  // Pooled rows are few and stable, so computing this per slot in the template
+  // is cheap — no imperative element map needed.
+  function shiftFor(i: number): string {
+    if (activeIdx < 0 || panelHeight === 0) return '';
+    const shifted = reverseSort ? i < activeIdx : i > activeIdx;
+    return shifted ? `transform:translateY(${panelHeight}px);` : '';
   }
-
-  // PERF: This $effect subscribes only to activeIdx, panelHeight, and
-  // groupIndexMap (which changes when filteredGroups changes). It never makes
-  // individual rows reactive to $activeGroups.
-  //
-  // On click: one JS loop over the ~33 registered row wrappers (17 visible +
-  // 8 overscan per side) + one setAttribute/removeAttribute per row that
-  // actually changes its transform. No component destroy/recreate, no cache
-  // clearing, no onMount re-runs. Imperative Map iteration is uniformly cheaper
-  // than letting Svelte propagate $activeGroups through a per-row derived.
-  $effect(() => {
-    const idx = activeIdx;
-    const shift = panelHeight;
-    const idxMap = groupIndexMap; // reactive dep so effect re-runs on filter changes
-    // PERF SORT: reverseSort flips which side of activeIdx receives the shift.
-    // In ascending mode rows AFTER (i > idx) move down. In descending mode
-    // rows BEFORE (i < idx) are visually below the panel and move down instead.
-    const isDesc = reverseSort;
-    // Re-run when the scroll window shifts and new rows mount so they receive
-    // the correct transform immediately rather than appearing at y=0.
-    const _ws = windowStart;
-    const _we = windowEnd;
-
-    if (idx < 0) {
-      for (const el of rowWrappers.values()) {
-        el.removeAttribute('transform');
-      }
-      return;
-    }
-
-    if (shift === 0) return;
-
-    for (const [id, el] of rowWrappers) {
-      const i = idxMap.get(id);
-      if (i === undefined) continue;
-      if (isDesc ? i < idx : i > idx) {
-        el.setAttribute('transform', `translate(0, ${shift})`);
-      } else {
-        el.removeAttribute('transform');
-      }
-    }
-  });
 
   const descStart = $derived(
     getDescStart(filteredGroups, descMinId, loading, pendingGroupCount),
@@ -333,68 +284,94 @@
   const AXIS_LABEL_ZONE = 150;
   const svgHeight = $derived(timelineHeight + AXIS_LABEL_ZONE);
 
-  // ── IntersectionObserver virtualization ────────────────────────────────────
-  // Because the SVG scrolls with the page (no bounded container to read
-  // scrollTop/clientHeight from), invisible sentinels spaced every
-  // SENTINEL_BLOCK_PX down the content report — via an IntersectionObserver
-  // rooted at the viewport — which pixel bands are near view. Their union is fed
-  // to the existing getWindowBounds math (asc/desc/pending aware) so only rows
-  // in view (+ rootMargin overscan) mount. rootMargin is the scroll overscan.
-  const SENTINEL_BLOCK_PX = 800;
-  const SENTINEL_ROOT_MARGIN = '400px';
-  const sentinelCount = $derived(
-    Math.max(1, Math.ceil(svgHeight / SENTINEL_BLOCK_PX)),
-  );
+  // ── Scroll-driven virtualization ────────────────────────────────────────────
+  // The timeline scrolls inside an overflow ancestor (#content-wrapper). We read
+  // the container's offset within that scroller on each scroll frame to get the
+  // visible pixel band, then feed it to getWindowBounds (asc/desc/pending aware)
+  // so only rows in view (+ overscan) mount.
+  //
+  // This deliberately does NOT use IntersectionObserver: the browser batches IO
+  // callbacks during fast scroll (in one trace: 36 callbacks for 408 scroll
+  // updates), so the mounted window trailed the viewport and rows only appeared
+  // once scrolling slowed. A per-frame getBoundingClientRect read stays locked
+  // to the viewport instead.
+  let visibleBand = $state<[number, number] | null>(null);
+  let scroller: HTMLElement | null = null;
+  let bandRafId: ReturnType<typeof requestAnimationFrame> | undefined;
+  let lastTop = NaN;
+  let lastHeight = NaN;
+  let stableFrames = 0;
+  // ~8 frames (~130ms) of no movement before the sampling loop stops.
+  const STABLE_FRAMES = 8;
 
-  const visibleBlocks = new SvelteSet<number>();
-  // Created eagerly (SSR-guarded) so sentinels can self-observe in their action,
-  // which runs during mount — before any $effect would. Disconnected on unmount.
-  const sentinelObserver =
-    typeof IntersectionObserver === 'undefined'
-      ? null
-      : new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) {
-              const block = Number(entry.target.getAttribute('data-block'));
-              if (entry.isIntersecting) {
-                visibleBlocks.add(block);
-              } else {
-                visibleBlocks.delete(block);
-              }
-            }
-          },
-          { root: null, rootMargin: SENTINEL_ROOT_MARGIN },
-        );
+  // Sample the viewport offset every frame while scrolling, rather than once per
+  // scroll event. A wheel/trackpad fling fires `wheel` events but coalesces (or
+  // drops) `scroll` events for the duration — so a scroll-event-driven measure
+  // goes stale mid-fling and rows blank out until it settles. A self-driven rAF
+  // loop reads the real position each frame regardless of which events fire.
+  function sampleBand() {
+    bandRafId = undefined;
+    if (!containerEl) return;
+    const elTop = containerEl.getBoundingClientRect().top;
+    const viewTop = scroller ? scroller.getBoundingClientRect().top : 0;
+    const viewHeight = scroller ? scroller.clientHeight : window.innerHeight;
+    // Container-local coordinate aligned with the top of the visible area.
+    const top = viewTop - elTop;
 
-  $effect(() => () => sentinelObserver?.disconnect());
+    if (top !== lastTop || viewHeight !== lastHeight) {
+      lastTop = top;
+      lastHeight = viewHeight;
+      stableFrames = 0;
+      visibleBand = [top, top + viewHeight];
+    } else {
+      stableFrames++;
+    }
 
-  function observeSentinel(node: HTMLElement, block: number) {
-    let current = block;
-    node.dataset.block = String(current);
-    sentinelObserver?.observe(node);
-    return {
-      update(next: number) {
-        current = next;
-        node.dataset.block = String(current);
-      },
-      destroy() {
-        sentinelObserver?.unobserve(node);
-        visibleBlocks.delete(current);
-      },
-    };
+    // Keep sampling until the position has held still for STABLE_FRAMES, then
+    // idle out. Any scroll/wheel/touch event pokes it back to life.
+    if (stableFrames < STABLE_FRAMES) {
+      bandRafId = requestAnimationFrame(sampleBand);
+    }
   }
 
-  // Visible pixel band from the intersecting sentinels. null until the observer
-  // first reports — the initial paint falls back to the top of the timeline.
-  const visibleBand = $derived.by<[number, number] | null>(() => {
-    if (!visibleBlocks.size) return null;
-    let min = Infinity;
-    let max = -Infinity;
-    for (const block of visibleBlocks) {
-      if (block < min) min = block;
-      if (block > max) max = block;
+  function pokeSampler() {
+    stableFrames = 0;
+    if (bandRafId === undefined) {
+      bandRafId = requestAnimationFrame(sampleBand);
     }
-    return [min * SENTINEL_BLOCK_PX, (max + 1) * SENTINEL_BLOCK_PX];
+  }
+
+  function findScrollParent(node: HTMLElement): HTMLElement | null {
+    let el = node.parentElement;
+    while (el) {
+      const overflowY = getComputedStyle(el).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  $effect(() => {
+    if (!containerEl) return;
+    scroller = findScrollParent(containerEl);
+    lastTop = NaN;
+    lastHeight = NaN;
+    stableFrames = 0;
+    sampleBand();
+    const target: HTMLElement | Window = scroller ?? window;
+    const opts = { passive: true };
+    // wheel/touchmove cover flings where `scroll` events are throttled.
+    target.addEventListener('scroll', pokeSampler, opts);
+    target.addEventListener('wheel', pokeSampler, opts);
+    target.addEventListener('touchmove', pokeSampler, opts);
+    window.addEventListener('resize', pokeSampler, opts);
+    return () => {
+      target.removeEventListener('scroll', pokeSampler);
+      target.removeEventListener('wheel', pokeSampler);
+      target.removeEventListener('touchmove', pokeSampler);
+      window.removeEventListener('resize', pokeSampler);
+      if (bandRafId !== undefined) cancelAnimationFrame(bandRafId);
+    };
   });
 
   const [windowStart, windowEnd] = $derived.by(() => {
@@ -414,7 +391,35 @@
     );
   });
 
-  const windowedGroups = $derived(filteredGroups.slice(windowStart, windowEnd));
+  // ── Row pool ────────────────────────────────────────────────────────────────
+  // A FIXED-size set of row slots reused across scroll instead of a keyed each
+  // that creates/destroys rows as the window slides. During scroll the pool size
+  // is stable (band height is constant), so slots keep their DOM + component
+  // instance and only re-point to a new group — no cloneNode/insert/teardown and
+  // far less allocation, which was tripping frequent major GC pauses.
+  const POOL_SLACK = 4;
+  const poolSize = $derived.by(() => {
+    const band = visibleBand;
+    const bandHeight = band ? band[1] - band[0] : Math.min(svgHeight, 1000);
+    return Math.ceil(bandHeight / height) + 2 * windowOverscan + POOL_SLACK;
+  });
+
+  // Slot p shows filteredGroups[windowStart + p], or null past the window/list.
+  // poolSize ≥ (windowEnd − windowStart) by construction, so every visible row
+  // has a slot. New {i, group} objects per derive are cheap (~poolSize of them);
+  // the each is keyed by slot index so the DOM stays put.
+  const pool = $derived.by(() => {
+    const start = windowStart;
+    const total = filteredGroups.length;
+    const slots: ({ i: number; group: EventGroups[number] } | null)[] = [];
+    for (let p = 0; p < poolSize; p++) {
+      const i = start + p;
+      slots.push(
+        i < windowEnd && i < total ? { i, group: filteredGroups[i] } : null,
+      );
+    }
+    return slots;
+  });
 
   const getY = $derived.by(
     () =>
@@ -442,21 +447,6 @@
   style="height: {svgHeight}px;"
   bind:this={containerEl}
 >
-  <!--
-    IntersectionObserver virtualization sentinels: invisible pixel bands that
-    report (against the viewport) which part of the page-scrolled timeline is in
-    view, so only the rows near it mount. Purely for measurement — no visuals.
-  -->
-  <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-    {#each Array(sentinelCount) as _, block (block)}
-      <div
-        class="absolute left-0 w-px"
-        style="top: {block *
-          SENTINEL_BLOCK_PX}px; height: {SENTINEL_BLOCK_PX}px;"
-        use:observeSentinel={block}
-      ></div>
-    {/each}
-  </div>
   <EndTimeInterval {workflow} {startTime} bind:currentTime={nowMs} let:endTime>
     <div
       class="pointer-events-none sticky top-[120px]"
@@ -472,38 +462,35 @@
       </div>
     </div>
     <!--
-      The <svg> is the full timeline height and scrolls with the page — no
-      translateY. Rows render at their absolute y; the page reveals the visible
-      portion natively, and IntersectionObserver decides which rows are mounted.
-      Only windowed rows exist in the DOM, so the SVG stays light despite being
-      tall.
+      HTML canvas: a tall positioned layer the page scrolls. Rows/lines/dots are
+      plain absolutely-positioned divs; IntersectionObserver decides which rows
+      mount, so only windowed rows exist in the DOM despite the canvas being tall.
     -->
-    <svg
-      {x}
-      {y}
-      viewBox="0 0 {canvasWidth} {svgHeight}"
-      height={svgHeight}
-      width={canvasWidth}
-      overflow="visible"
-      class="-mt-4"
+    <div
+      class="canvas"
+      style="width:{canvasWidth}px;height:{svgHeight}px;--dot:{dotSize}px;--dot-r:{dotRadius}px;"
     >
       <!--
-        PERF: Defines all 11 timeline icon <symbol> elements once per SVG.
-        Every <TimelineIcon> is a single <use href="#ti-{name}"> node — no
-        {#if} branching, no innerHTML parsing, no repeated path data in the DOM.
-        The browser caches the symbol geometry; rendering cost per icon is minimal.
+        Icon symbol sheet: one hidden <svg> holding every <symbol>. Each icon in
+        the tree is a tiny <svg><use href="#ti-…"></svg> — native instancing,
+        no {#if} branching, no innerHTML parsing, no repeated path data.
       -->
-      <TimelineIconDefs />
-      <Line
-        startPoint={[gutter, lineTop]}
-        endPoint={[gutter, lineBottom]}
-        strokeWidth={radius / 2}
-      />
-      <Line
-        startPoint={[canvasWidth - gutter, lineTop]}
-        endPoint={[canvasWidth - gutter, lineBottom]}
-        strokeWidth={radius / 2}
-      />
+      <svg class="icon-defs" aria-hidden="true"><TimelineIconDefs /></svg>
+
+      <!-- Border rails -->
+      <div
+        class="rail"
+        style="left:{gutter - radius / 4}px;top:{lineTop}px;width:{radius /
+          2}px;height:{lineBottom}px;"
+      ></div>
+      <div
+        class="rail"
+        style="left:{canvasWidth -
+          gutter -
+          radius / 4}px;top:{lineTop}px;width:{radius /
+          2}px;height:{lineBottom}px;"
+      ></div>
+
       <TimelineAxis
         x1={gutter - radius / 4}
         x2={canvasWidth - gutter + radius / 4}
@@ -514,59 +501,47 @@
       />
       <WorkflowRow {workflow} y={height} length={canvasWidth} />
       {#if !loading}
-        <g transform="translate({gutter}, 0)">
+        <!-- Collapsed segment coords are 0-based; the +gutter offset the SVG got
+             from translate(gutter,0) is provided by this anchor's left. -->
+        <div class="collapsed-layer" style="left:{gutter}px;">
           <TimelineCollapsedLayer
             {scale}
             {timelineHeight}
             {readOnly}
             onToggle={toggleSegment}
           />
-        </g>
+        </div>
       {/if}
 
       <!--
-        PERF IMPERATIVE TRANSFORM APPROACH:
-        Single {#each} loop — rows are never destroyed/recreated on click.
-        Each row's <g> wrapper is registered in rowWrappers via use:registerRow.
-        The $effect in <script> iterates those refs and stamps transform
-        attributes directly when activeIdx or panelHeight changes.
-
-        Cost on click: O(N) Map iteration + N-K setAttribute calls (compositor
-        path, no layout pass). No component lifecycle operations at all.
-        Uniformly fast for both top and bottom clicks.
+        POOLED ROWS: the each is keyed by slot INDEX (stable 0..poolSize-1), so
+        Svelte never creates/destroys/reorders these <li>s during scroll — it
+        just updates each slot's group + top in place. The <li> stays mounted
+        even when its slot is null (past the list edge); only the inner row is
+        conditionally rendered, so mid-list scrolling causes zero component
+        churn. top comes from getRowY (asc formula or descending mirror), and
+        shiftFor applies the open-panel offset per slot.
       -->
-      <!--
-        PERF SORT: rows always iterate in ascending key order — Svelte never
-        reorders DOM nodes when sort changes. y is computed from the loop index
-        using the ascending formula (i+2)*height or the descending mirror
-        (totalForY+1-i)*height so that the visual order flips without any
-        insertBefore. totalForY = filteredGroups.length + pendingGroupCount keeps
-        all existing rows at a stable y as new data streams in: pendingGroupCount
-        shrinks as filteredGroups grows, so totalForY ≈ constant throughout.
-        The transform $effect handles the panel-shift side; it already accounts
-        for reverseSort by checking (i < idx) instead of (i > idx).
-      -->
-      {#each windowedGroups as group, localI (group.id)}
-        {@const i = windowStart + localI}
-        {@const y = getY(i)}
-        <g use:registerRow={group.id}>
-          <!--
-            PERF: Key on group.eventList.length so Svelte only re-renders
-            this row when new events are appended to the group. Frozen to 0
-            during loading to prevent destroy+recreate on every streaming
-            batch — after loading, individual live-event arrivals are fine.
-          -->
-          {#key loading ? 0 : group.eventList.length}
-            <TimelineGraphRow
-              {y}
-              {group}
-              {canvasWidth}
-              project={projectX}
-              {readOnly}
-            />
-          {/key}
-        </g>
-      {/each}
+      <ul class="rows">
+        {#each pool as slot, p (p)}
+          <li
+            class="row-anchor"
+            style={slot
+              ? `top:${getY(slot.i) - height / 2}px;height:${height}px;${shiftFor(slot.i)}`
+              : 'display:none;'}
+          >
+            {#if slot}
+              <TimelineGraphRow
+                group={slot.group}
+                eventCount={slot.group.eventList.length}
+                {canvasWidth}
+                project={projectX}
+                {readOnly}
+              />
+            {/if}
+          </li>
+        {/each}
+      </ul>
 
       {#if loading && pendingGroupCount > 0}
         {@const rectY = getPendingBlockY({
@@ -577,20 +552,17 @@
           radius,
         })}
         {@const rectH = pendingGroupCount * height + radius}
-        <rect
-          x={gutter}
-          y={rectY}
-          width={canvasWidth - gutter * 2}
-          height={rectH}
-          rx="4"
-          class="animate-pulse fill-slate-400/30"
-        />
+        <div
+          class="skeleton animate-pulse rounded bg-slate-400/30"
+          style="left:{gutter}px;top:{rectY}px;width:{canvasWidth -
+            gutter * 2}px;height:{rectH}px;"
+        ></div>
       {/if}
 
       <!--
-        Details panel sits above all rows in SVG paint order (last child = top).
-        onHeight delivers the actual panel height back so the $effect can update
-        transforms. Only panelHeight changes — no row attributes touched.
+        Details panel is the last child (paints above rows). onHeight reports the
+        real panel height so the transform $effect shifts rows below it. Only
+        panelHeight changes — no row attributes touched.
       -->
       {#if !readOnly && activeIdx >= 0}
         {@const grp = filteredGroups[activeIdx]}
@@ -607,6 +579,100 @@
           />
         {/if}
       {/if}
-    </svg>
+    </div>
   </EndTimeInterval>
 </div>
+
+<style lang="postcss">
+  /* In-flow (like the old <svg>) so the sticky start/end labels float over it;
+     -mt-4 tucks it under the controls border. Positioned so the absolutely
+     placed rows/axis resolve against it. */
+  .canvas {
+    position: relative;
+    margin-top: -1rem;
+    color: #fff;
+  }
+
+  /* Hidden symbol sheet — takes no layout space. */
+  .icon-defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+  }
+
+  .rail {
+    position: absolute;
+    background: currentColor;
+  }
+
+  /* Zero-size anchor: shifts the collapsed layer's 0-based coords by the gutter,
+     mirroring the SVG translate(gutter, 0). */
+  .collapsed-layer {
+    position: absolute;
+    top: 0;
+  }
+
+  /* The rows layer covers the whole canvas and paints above the collapsed
+     layer, so make it pointer-transparent — only the event buttons opt back in
+     (pointer-events:auto) — otherwise it would swallow clicks meant for the
+     collapse toggles underneath. */
+  .rows {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    pointer-events: none;
+  }
+
+  .row-anchor {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+
+  .skeleton {
+    position: absolute;
+  }
+
+  /* Connector-line styles for both row components (timeline-graph-row,
+     workflow-row). They render `.tl-line` divs in child components, so the
+     rules are :global — but namespaced under this component's scoped `.canvas`
+     so they don't leak. Each element sets only its geometry + --tl-line-color
+     inline; these carry the rest. border-radius: 9999px → pill ends. */
+  .canvas :global(.tl-line) {
+    border-radius: 9999px;
+    background-color: var(--tl-line-color);
+  }
+
+  .canvas :global(.tl-line--gradient) {
+    background-image: linear-gradient(255deg, #1ff1a5 0%, #f55 100%);
+  }
+
+  .canvas :global(.tl-line--dashed) {
+    background-color: transparent;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--tl-line-color) 0 3px,
+      transparent 3px 6px
+    );
+    background-size: 6px 100%;
+  }
+
+  .canvas :global(.tl-line--animate) {
+    animation: tl-line-dash 60s linear infinite;
+  }
+
+  /* -global- so the name isn't scope-hashed; the :global rule above references
+     it by its plain name. */
+  @keyframes -global-tl-line-dash {
+    from {
+      background-position-x: 200px;
+    }
+
+    to {
+      background-position-x: 0;
+    }
+  }
+</style>

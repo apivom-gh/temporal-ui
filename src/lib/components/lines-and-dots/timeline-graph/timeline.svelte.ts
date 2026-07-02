@@ -22,14 +22,14 @@ interface TimelineInit {
 }
 
 export class Timeline {
-  #collapsedSegmentKeys = new SvelteSet<TimeSegmentKey>();
-  #hasUserToggled = false;
+  private _collapsedSegmentKeys = new SvelteSet<TimeSegmentKey>();
+  private _hasUserToggled = false;
 
-  #getFullEventHistory: () => WorkflowEvents;
-  #getWorkflow: () => WorkflowExecution;
-  #getEventGroups: () => EventGroups;
-  #getCurrentTimeMs: () => number;
-  #getDurationThresholdRatio: () => number;
+  private _getFullEventHistory: () => WorkflowEvents;
+  private _getWorkflow: () => WorkflowExecution;
+  private _getEventGroups: () => EventGroups;
+  private _getCurrentTimeMs: () => number;
+  private _getDurationThresholdRatio: () => number;
 
   constructor({
     getFullEventHistory,
@@ -38,27 +38,27 @@ export class Timeline {
     getCurrentTimeMs,
     getDurationThresholdRatio,
   }: TimelineInit) {
-    this.#getFullEventHistory = getFullEventHistory;
-    this.#getWorkflow = getWorkflow;
-    this.#getEventGroups = getEventGroups;
-    this.#getCurrentTimeMs = getCurrentTimeMs;
-    this.#getDurationThresholdRatio =
+    this._getFullEventHistory = getFullEventHistory;
+    this._getWorkflow = getWorkflow;
+    this._getEventGroups = getEventGroups;
+    this._getCurrentTimeMs = getCurrentTimeMs;
+    this._getDurationThresholdRatio =
       getDurationThresholdRatio ?? (() => DEFAULT_DURATION_THRESHOLD_RATIO);
   }
 
-  readonly workflow = $derived.by(() => this.#getWorkflow());
-  readonly eventGroups = $derived.by(() => this.#getEventGroups());
+  readonly workflow = $derived.by(() => this._getWorkflow());
+  readonly eventGroups = $derived.by(() => this._getEventGroups());
   private readonly _endUnbounded = $derived(!this.workflow.endTime);
 
   private readonly _endMs = $derived.by(() => {
-    const end = this.workflow.endTime ?? this.#getCurrentTimeMs();
+    const end = this.workflow.endTime ?? this._getCurrentTimeMs();
     return validTimeToDate(end).getTime();
   });
 
   private readonly _startMs = $derived.by(() => {
     // Event history is ordered ascending by event time, so the earliest event
     // is the first entry — no need to map and scan the whole array.
-    const firstEventTime = this.#getFullEventHistory()[0]?.eventTime;
+    const firstEventTime = this._getFullEventHistory()[0]?.eventTime;
 
     const startCandidates = [
       firstEventTime,
@@ -107,15 +107,15 @@ export class Timeline {
   readonly expandedDurationMs = $derived.by(() =>
     this.segments.reduce(
       (sum, segment) =>
-        this.#isSegmentCollapsedRaw(segment)
+        this._isSegmentCollapsedRaw(segment)
           ? sum
           : sum + segment.timespan.durationMs,
       0,
     ),
   );
 
-  #isSegmentCollapsedRaw(segment: TimeSegment): boolean {
-    return this.#collapsedSegmentKeys.has(segment.timespan.key);
+  private _isSegmentCollapsedRaw(segment: TimeSegment): boolean {
+    return this._collapsedSegmentKeys.has(segment.timespan.key);
   }
 
   isTimeSegmentCollapsible(segment: TimeSegment): boolean {
@@ -125,13 +125,13 @@ export class Timeline {
 
     return (
       segment.timespan.durationMs / this.expandedDurationMs >=
-      this.#getDurationThresholdRatio()
+      this._getDurationThresholdRatio()
     );
   }
 
   isTimeSegmentCollapsed(segment: TimeSegment): boolean {
     return (
-      this.#isSegmentCollapsedRaw(segment) &&
+      this._isSegmentCollapsedRaw(segment) &&
       this.isTimeSegmentCollapsible(segment)
     );
   }
@@ -152,32 +152,32 @@ export class Timeline {
   );
 
   toggleTimeSegment(segment: TimeSegment): void {
-    this.#hasUserToggled = true;
+    this._hasUserToggled = true;
     const key = segment.timespan.key;
-    if (this.#collapsedSegmentKeys.has(key)) {
-      this.#collapsedSegmentKeys.delete(key);
+    if (this._collapsedSegmentKeys.has(key)) {
+      this._collapsedSegmentKeys.delete(key);
     } else {
-      this.#collapsedSegmentKeys.add(key);
+      this._collapsedSegmentKeys.add(key);
     }
   }
 
   expandAllSegments(): void {
-    this.#hasUserToggled = true;
-    this.#collapsedSegmentKeys.clear();
+    this._hasUserToggled = true;
+    this._collapsedSegmentKeys.clear();
   }
 
   collapseAllSegments(): void {
-    this.#hasUserToggled = true;
-    this.#collapseAllSegments();
+    this._hasUserToggled = true;
+    this._collapseAllSegments();
   }
 
   collapseAllSegmentsByDefault(): void {
-    if (this.#hasUserToggled) return;
-    this.#collapseAllSegments();
+    if (this._hasUserToggled) return;
+    this._collapseAllSegments();
   }
 
-  #collapseAllSegments(): void {
-    // purposefully not setting this.#hasUserToggled = true
+  private _collapseAllSegments(): void {
+    // purposefully not setting this._hasUserToggled = true
     // here. Only public facing methods should set flag.
     let collapsed = true;
 
@@ -187,9 +187,9 @@ export class Timeline {
       collapsed = false;
       for (const segment of this.segments) {
         const key = segment.timespan.key;
-        if (this.#collapsedSegmentKeys.has(key)) continue;
+        if (this._collapsedSegmentKeys.has(key)) continue;
         if (this.isTimeSegmentCollapsible(segment)) {
-          this.#collapsedSegmentKeys.add(key);
+          this._collapsedSegmentKeys.add(key);
           collapsed = true;
         }
       }

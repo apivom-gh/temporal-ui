@@ -6,10 +6,10 @@ export interface TimespanBounds {
 }
 
 export class Timespan {
-  #startTimeMs: number;
-  #endTimeMs: number;
-  #startUnbounded: boolean;
-  #endUnbounded: boolean;
+  private _startTimeMs: number;
+  private _endTimeMs: number;
+  private _startUnbounded: boolean;
+  private _endUnbounded: boolean;
 
   constructor(
     startTimeMs: number,
@@ -20,26 +20,26 @@ export class Timespan {
       throw new RangeError('Start time cannot come after end time');
     }
 
-    this.#startTimeMs = startTimeMs;
-    this.#endTimeMs = endTimeMs;
-    this.#startUnbounded = bounds.startUnbounded ?? false;
-    this.#endUnbounded = bounds.endUnbounded ?? false;
+    this._startTimeMs = startTimeMs;
+    this._endTimeMs = endTimeMs;
+    this._startUnbounded = bounds.startUnbounded ?? false;
+    this._endUnbounded = bounds.endUnbounded ?? false;
   }
 
   get key(): string {
-    const start = this.#startUnbounded
+    const start = this._startUnbounded
       ? UNBOUNDED_KEY
-      : String(this.#startTimeMs);
-    const end = this.#endUnbounded ? UNBOUNDED_KEY : String(this.#endTimeMs);
+      : String(this._startTimeMs);
+    const end = this._endUnbounded ? UNBOUNDED_KEY : String(this._endTimeMs);
     return `${start}-${end}`;
   }
 
   get startUnbounded(): boolean {
-    return this.#startUnbounded;
+    return this._startUnbounded;
   }
 
   get endUnbounded(): boolean {
-    return this.#endUnbounded;
+    return this._endUnbounded;
   }
 
   get durationMs(): number {
@@ -47,19 +47,19 @@ export class Timespan {
   }
 
   get startTimeMs() {
-    return this.#startTimeMs;
+    return this._startTimeMs;
   }
 
   set startTimeMs(startMs: number) {
-    if (startMs > this.#endTimeMs) {
+    if (startMs > this._endTimeMs) {
       throw new RangeError('Start time cannot come after end time');
     }
 
-    this.#startTimeMs = startMs;
+    this._startTimeMs = startMs;
   }
 
   get endTimeMs() {
-    return this.#endTimeMs;
+    return this._endTimeMs;
   }
 
   set endTimeMs(endMs: number) {
@@ -67,7 +67,7 @@ export class Timespan {
       throw new RangeError('Start time cannot come after end time');
     }
 
-    this.#endTimeMs = endMs;
+    this._endTimeMs = endMs;
   }
 
   contains(timeMs: number): boolean {
