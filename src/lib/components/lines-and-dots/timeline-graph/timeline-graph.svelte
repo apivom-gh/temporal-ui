@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { twMerge } from 'tailwind-merge';
+
   import { timestamp } from '$lib/components/timestamp.svelte';
   import type { EventGroups } from '$lib/models/event-groups/event-groups';
   import { activeGroups } from '$lib/stores/active-events';
@@ -45,6 +47,9 @@
     totalExpectedEvents?: number;
     descMinId?: number;
     panelHeight?: number;
+    /** Actual drawn content height (rows + axis + panel), reported to the parent
+     * so it can size the scroll container to exactly what the graph renders. */
+    contentHeight?: number;
     onTimelineInit?: (timeline: Timeline) => void;
   }
 
@@ -62,6 +67,7 @@
     totalExpectedEvents = 0,
     descMinId = 0,
     panelHeight = $bindable(0),
+    contentHeight = $bindable(0),
     onTimelineInit,
   }: Props = $props();
 
@@ -69,34 +75,6 @@
 
   let canvasWidth = $state(0);
   const scrollY = $derived(scrollYProp ?? 0);
-
-  const AXIS_TICKS = 20;
-  const axisX1 = $derived(gutter - radius / 4);
-  const axisX2 = $derived(canvasWidth - gutter + radius / 4);
-  const tickDistance = $derived((axisX2 - axisX1) / AXIS_TICKS);
-
-  // CSS background string for the 19 dashed tick lines.
-  // Recomputes only on canvasWidth change (resize), never during scroll.
-  const gridBackgroundStyle = $derived.by(() => {
-    if (canvasWidth === 0 || tickDistance <= 0) return '';
-    const td = tickDistance;
-    const count = AXIS_TICKS - 1;
-    const images = Array.from(
-      { length: count },
-      () =>
-        'repeating-linear-gradient(to bottom, currentColor 0px, currentColor 2px, transparent 2px, transparent 4px)',
-    ).join(', ');
-    const sizes = Array.from({ length: count }, () => '1px 4px').join(', ');
-    const positions = Array.from(
-      { length: count },
-      (_, i) => `${(axisX1 + (i + 1) * td).toFixed(1)}px 0`,
-    ).join(', ');
-    const repeats = Array.from(
-      { length: count },
-      () => 'no-repeat repeat',
-    ).join(', ');
-    return `background-image:${images};background-size:${sizes};background-position:${positions};background-repeat:${repeats};`;
-  });
 
   // PERF: bind:clientWidth={canvasWidth} compiled to bind_element_size which reads
   // element.clientWidth inside a Svelte effect during every reactive flush (~150×
@@ -301,6 +279,7 @@
   // A plain Map of group-id → SVG <g> wrapper element, populated by the
   // use:registerRow action on each row. Not reactive — Svelte never observes
   // this Map, so registering/deregistering rows causes no reactive cascade.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
   const rowWrappers = new Map<string, SVGGElement>();
 
   function registerRow(el: SVGGElement, id: string) {
@@ -362,13 +341,20 @@
     getTotalForY(filteredGroups.length, pendingGroupCount, descStart),
   );
 
+  // The open detail panel shifts every row below it down by panelHeight (via a
+  // transform), but getWindowBounds maps scroll → rows using the unshifted
+  // getRowY. Widen the mount window by the panel's row span so those shifted
+  // rows stay mounted instead of leaving a blank band under the panel that
+  // grows until you scroll a full panelHeight.
+  const windowOverscan = $derived(OVERSCAN + Math.ceil(panelHeight / height));
+
   const [windowStart, windowEnd] = $derived(
     getWindowBounds(
       scrollY,
       effectiveViewportHeight,
       filteredGroups.length,
       height,
-      OVERSCAN,
+      windowOverscan,
       reverseSort,
       descStart,
       pendingGroupCount,
@@ -402,21 +388,29 @@
       panelHeight,
   );
 
-  // Border lines clipped to the overscan window — updated only at hysteresis
-  // rate (same cadence as row add/remove), never on every scroll frame.
-  const lineTop = $derived(windowStart * height);
-  const lineBottom = $derived(windowEnd * height);
+  // Report the true drawn height back to the parent so it sizes the scroll
+  // container to what we actually render — never a separate row-count estimate,
+  // which drifts under filters/loading and leaves a variable gap below the axis.
+  $effect(() => {
+    contentHeight = timelineHeight;
+  });
+
+  // Border rails span the full graph height so they meet the bottom axis
+  // regardless of scroll position. They're only two points each and update
+  // solely when timelineHeight changes (row add/remove, panel), so there's no
+  // per-scroll-frame cost from spanning the whole timeline.
+  const lineTop = 0;
+  const lineBottom = $derived(timelineHeight);
 </script>
 
 <div
   id="event-history-timeline-graph"
-  class="relative h-full overflow-hidden border border-t-0 border-subtle bg-primary"
+  class={twMerge(
+    'relative h-full overflow-hidden border border-t-0 border-subtle bg-primary',
+    error && 'bg-danger',
+  )}
   bind:this={containerEl}
 >
-  <div
-    class="pointer-events-none absolute inset-0 opacity-30"
-    style={gridBackgroundStyle}
-  ></div>
   <EndTimeInterval {workflow} {startTime} bind:currentTime={nowMs} let:endTime>
     <div
       class="pointer-events-none sticky top-[120px]"
@@ -459,7 +453,6 @@
       width={canvasWidth}
       overflow="visible"
       class="-mt-4"
-      class:error
       style:transform="translateY(-{scrollY}px)"
       style:will-change="transform"
     >
@@ -588,10 +581,6 @@
 </div>
 
 <style lang="postcss">
-  .error {
-    @apply bg-danger;
-  }
-
   .skeleton-rows {
     border-radius: 4px;
     overflow: hidden;

@@ -102,136 +102,72 @@
     updateEventFilterParams(page.url, { sort: newSort }, goto);
   };
 
-  // ── Sticky canvas + sentinel scroll (mirrors fasterer page pattern) ────────
-  // The outer #content-wrapper scrolls. The sentinel sits at the top of the
-  // canvas area. Once content above it scrolls off, the sticky wrapper locks
-  // to the viewport. The sentinel's getBoundingClientRect().top drives scrollY
-  // so TimelineGraph's per-row guard knows which rows are visible.
-
-  let sentinelEl = $state<HTMLDivElement | null>(null);
-  let scrollContainerEl: HTMLElement | null = null;
+  // ── Dedicated timeline scroll container ────────────────────────────────────
+  // The timeline scrolls inside its own overflow-y container, so the
+  // container's scrollTop *is* the pan amount — no page-offset sentinel, no
+  // spacer-vs-page bookkeeping, no re-measuring when content above shifts.
+  // TimelineGraph keeps its translateY compositor model; we just feed it
+  // scrollTop and the container's height.
+  let scrollEl = $state<HTMLDivElement | null>(null);
+  let viewportHeight = $state(0);
   let timelineScrollY = $state(0);
-
-  // Total pixel height for the spacer that extends the page scroll range.
-  // spacer = timelineHeight − stickyHeight so that when scrollTop reaches its
-  // maximum the bottom axis line aligns with the bottom of the viewport.
-  // timelineHeight = (groups + 2) * ROW_PX (mirrors timeline-graph.svelte).
-  // stickyHeight is measured via bind:clientHeight on the sticky canvas div.
-  const ROW_PX = 24;
-  let stickyHeight = $state(0);
-  let graphPanelHeight = $state(0);
   let controlsHeight = $state(0);
+  let scrollDirty = false;
+
+  // Space below the bottom axis for the rotated x-axis tick labels. Part of the
+  // scrollable content height so the labels always scroll fully into view.
+  const AXIS_LABEL_ZONE_PX = 150;
+
+  // Actual drawn height of the timeline, reported by TimelineGraph. The scroll
+  // content is exactly this plus the label zone, so the gap below the axis is
+  // always the label zone — no cross-component estimate to drift.
+  let graphContentHeight = $state(0);
+  const scrollContentHeight = $derived(
+    Math.max(graphContentHeight, 120) + AXIS_LABEL_ZONE_PX,
+  );
+  // Bound the scroll container to the viewport with an explicit dvh-based
+  // max-height. This is what makes it the scroll region (its clientHeight is the
+  // visible viewport, so getWindowBounds virtualizes correctly). flex-1 can't do
+  // this here — the app-shell column it lives in is percentage-height against an
+  // auto-height <main>, so it isn't a definite height for flex to divide.
+  const viewportMaxHeight = $derived(
+    `calc(100dvh - var(--top-nav-height, 3rem) - ${controlsHeight}px)`,
+  );
+
   const estimatedTotalGroups = $derived.by(() => {
     if (historyCtx.fetchComplete) return groups.length;
     const totalEvents = historyCtx.totalExpectedEvents ?? 0;
     return Math.max(groups.length, Math.ceil(totalEvents * 0.5));
   });
 
-  const totalRows = $derived(
-    historyCtx.fetchComplete ? groups.length : estimatedTotalGroups,
-  );
-  // Natural pixel height of all timeline content (rows + axis + detail panel).
-  // +120 matches timeline-graph's canvasHeight = timelineHeight + 120, which
-  // provides space for the date labels zone above and the time axis below.
-  // When fewer events fit in one viewport the canvas shrinks to this height,
-  // matching master's compact look. For large histories it is capped at the
-  // viewport via CSS min(), enabling virtual-scroll without changing the logic.
-  const canvasContentHeight = $derived(
-    Math.max((totalRows + 2) * ROW_PX, 120) + graphPanelHeight + 120,
-  );
-  // The canvas sticks below both the top-nav and the controls bar, so the
-  // maximum viewport-filling height must subtract both of their heights.
-  const canvasMaxHeight = $derived(
-    `calc(100dvh - var(--top-nav-height, 3rem) - ${controlsHeight}px)`,
-  );
-  const spacerHeight = $derived(
-    Math.max((totalRows + 2) * ROW_PX, 120) - stickyHeight + graphPanelHeight,
-  );
-
-  // Sentinel's layout position within the scroll container — measured once at
-  // mount so the hot-path scroll handler uses only arithmetic (no
-  // getBoundingClientRect(), which forces layout after DOM mutations).
-  let sentinelOffset = 0;
-
   onMount(() => {
     historyCtx.resume();
     bufferGroups = getGroupArray({ excludeWorkflowTasks: true });
 
-    scrollContainerEl = document.getElementById('content-wrapper');
-
-    if (scrollContainerEl && sentinelEl) {
-      // One-time layout read: sentinel position relative to scroll container.
-      // scrollTop is 0 at mount, so BoundingClientRect.top equals the
-      // document-relative offset minus the container's top.
-      const containerRect = scrollContainerEl.getBoundingClientRect();
-      const sentinelRect = sentinelEl.getBoundingClientRect();
-      sentinelOffset =
-        sentinelRect.top - containerRect.top + scrollContainerEl.scrollTop;
-
-      // Scroll tracking: dirty-flag + perpetual RAF tick.
-      //
-      // The scroll event handler does NOTHING except flip a boolean — zero layout
-      // reads, zero Svelte writes. This means CodeMirror's observers.scroll (which
-      // also listens on #content-wrapper) reads scrollTop / getBoundingClientRect
-      // against an untouched DOM → no forced style recalculation of SVG children.
-      //
-      // The RAF tick runs once per animation frame (before paint). At that point:
-      //   • The previous frame's Svelte writes have been painted → DOM is clean.
-      //   • We read scrollTop (clean read, no pending mutations from us).
-      //   • Then we write timelineScrollY (dirty write — Svelte queues effects).
-      //   • Browser recalculates SVG styles naturally as part of the render pipeline.
-      //
-      // Result: zero forced reflows in the scroll hot-path.
-      let scrollDirty = false;
-      let prevScrollY = -1;
-      let rafId = 0;
-
-      const markDirty = () => {
-        scrollDirty = true;
-      };
-      scrollContainerEl.addEventListener('scroll', markDirty, {
-        passive: true,
-      });
-
-      const tick = () => {
-        if (scrollDirty) {
-          scrollDirty = false;
-          const rawY = Math.max(
-            0,
-            scrollContainerEl.scrollTop - sentinelOffset,
-          );
-          if (rawY !== prevScrollY) {
-            prevScrollY = rawY;
-            timelineScrollY = rawY;
-          }
+    // Scroll tracking: the container's onscroll handler only flips scrollDirty
+    // (zero layout reads / Svelte writes in the handler). This RAF tick reads
+    // scrollTop once per frame and writes it straight through as the pan — the
+    // scroll container's scrollTop IS the timeline offset, no math required.
+    let lastScrollTop = -1;
+    let rafId = 0;
+    const tick = () => {
+      if (scrollDirty && scrollEl) {
+        scrollDirty = false;
+        const top = scrollEl.scrollTop;
+        if (top !== lastScrollTop) {
+          lastScrollTop = top;
+          timelineScrollY = top;
         }
-        rafId = requestAnimationFrame(tick);
-      };
+      }
       rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
 
-      // Throttle buffer → Svelte updates to at most once per animation frame.
-      // onLatestGroup fires for every new group head (~N times during load),
-      // each triggering getGroupArray() (O(N log N) sort) + full Svelte
-      // reactive cascade. Batching via rAF reduces that to ≤60 updates/sec
-      // regardless of how fast the bidirectional cursors push data.
-      let groupUpdatePending = false;
-      const unsub = onLatestGroup(() => {
-        if (!groupUpdatePending) {
-          groupUpdatePending = true;
-          requestAnimationFrame(() => {
-            groupUpdatePending = false;
-            bufferGroups = getGroupArray({ excludeWorkflowTasks: true });
-          });
-        }
-      });
-
-      return () => {
-        scrollContainerEl?.removeEventListener('scroll', markDirty);
-        cancelAnimationFrame(rafId);
-        unsub();
-      };
-    }
-
+    // Throttle buffer → Svelte updates to at most once per animation frame.
+    // onLatestGroup fires for every new group head (~N times during load),
+    // each triggering getGroupArray() (O(N log N) sort) + full Svelte
+    // reactive cascade. Batching via rAF reduces that to ≤60 updates/sec
+    // regardless of how fast the bidirectional cursors push data.
     let groupUpdatePending = false;
     const unsub = onLatestGroup(() => {
       if (!groupUpdatePending) {
@@ -242,7 +178,11 @@
         });
       }
     });
-    return () => unsub();
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      unsub();
+    };
   });
 
   $effect(() => {
@@ -298,9 +238,8 @@
 
 <!--
   Wrapper: single flex child so the parent's gap-4 only applies once (above
-  this block). Internally the children are in normal block flow with no gaps,
-  meaning the controls bar, sentinel, and sticky canvas are flush against each
-  other with no phantom spacing from the flex gap.
+  this block). Internally the controls bar and the scroll container are in
+  normal block flow with no gaps, so they sit flush.
 -->
 <div>
   <div
@@ -362,45 +301,41 @@
   </div>
 
   <!--
-  Sentinel: zero-height element marking the top of the canvas area.
-  Its viewport-relative top gives us timelineScrollY without tracking heights.
-  Lives inside the wrapper (block flow) so the parent's flex gap-4 does not
-  push the canvas away from the controls bar.
--->
-  <div bind:this={sentinelEl} class="pointer-events-none h-0"></div>
-
-  <!--
-  Sticky canvas: locks below the top-nav AND the controls bar once the content
-  above scrolls off. border-t supplies the top border that timeline-graph omits
-  (border-t-0) so it shares the controls bar's border-b in master's layout.
-  overflow-hidden clips TimelineGraph so it doesn't expand the page height.
+  Dedicated scroll container: its own scrollTop is the timeline pan, so no
+  page-offset measurement is needed. The dvh-based max-height bounds it to the
+  viewport so it (not the page) is the scroll region — which is what keeps
+  virtualization working: its clientHeight is the visible height fed to
+  getWindowBounds. The tall inner element supplies the scroll range; the sticky
+  wrapper is the pinned viewport TimelineGraph pans within (translateY
+  compositor model). border-t supplies the border timeline-graph omits.
 -->
   <div
-    class="sticky overflow-hidden border-t border-subtle"
-    style="top: calc(var(--top-nav-height, 3rem) + {controlsHeight}px); height: min({canvasContentHeight}px, {canvasMaxHeight});"
-    bind:clientHeight={stickyHeight}
+    class="relative overflow-y-auto overflow-x-hidden border-t border-subtle"
+    style="max-height: {viewportMaxHeight};"
+    bind:this={scrollEl}
+    bind:clientHeight={viewportHeight}
+    onscroll={() => (scrollDirty = true)}
   >
     {#if workflow}
-      <TimelineGraph
-        {workflow}
-        {groups}
-        {reverseSort}
-        loading={!historyCtx.fetchComplete}
-        scrollY={timelineScrollY}
-        totalExpectedEvents={estimatedTotalGroups}
-        descMinId={historyCtx.descMinId}
-        error={Boolean(workflowTaskFailedError)}
-        bind:panelHeight={graphPanelHeight}
-        onTimelineInit={handleTimelineInit}
-      />
+      <div style="height: {scrollContentHeight}px;">
+        <div class="sticky top-0" style="height: {viewportHeight}px;">
+          <TimelineGraph
+            {workflow}
+            {groups}
+            {reverseSort}
+            loading={!historyCtx.fetchComplete}
+            scrollY={timelineScrollY}
+            {viewportHeight}
+            totalExpectedEvents={estimatedTotalGroups}
+            descMinId={historyCtx.descMinId}
+            error={Boolean(workflowTaskFailedError)}
+            bind:contentHeight={graphContentHeight}
+            onTimelineInit={handleTimelineInit}
+          />
+        </div>
+      </div>
     {/if}
   </div>
-
-  <!--
-  Spacer: extends #content-wrapper's scroll range to cover the full timeline height.
-  The sentinel + scroll handler convert that scrollTop into timelineScrollY.
--->
-  <div class="pointer-events-none" style="height: {spacerHeight}px;"></div>
 </div>
 <!-- end wrapper -->
 

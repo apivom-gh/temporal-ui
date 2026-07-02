@@ -20,7 +20,10 @@
 
   const AXIS_STROKE_WIDTH = radius / 2;
 
-  const ZIGZAG_HALF_WIDTH = 4;
+  const ZIGZAG_HALF_WIDTH = 5;
+  // Vertical distance the zigzag travels between direction changes. One full
+  // left→right→left period is 2 * ZIGZAG_STEP tall — the pattern tile height.
+  const ZIGZAG_STEP = 8;
 
   const HIT_HALF_WIDTH = Math.max(radius, 12);
   const HIT_WIDTH = HIT_HALF_WIDTH * 2;
@@ -28,20 +31,6 @@
   const collapsibleSegments = $derived(
     scale.segments.filter((s) => s.isCollapsible),
   );
-
-  const zigzagPath = (xStart: number, xEnd: number, height: number) => {
-    const step = 8;
-    let d = `M ${xStart} 0`;
-    let y = 0;
-    let toRight = true;
-    while (y < height) {
-      const nextY = Math.min(y + step, height);
-      d += ` L ${toRight ? xEnd : xStart} ${nextY}`;
-      toRight = !toRight;
-      y = nextY;
-    }
-    return d;
-  };
 
   let activeSegmentKey = $state<string | null>(null);
 
@@ -67,12 +56,36 @@
   })}
   {#if seg.isCollapsed}
     {@const half = Math.min(ZIGZAG_HALF_WIDTH, (seg.endPx - seg.startPx) / 4)}
-    <path
-      class="zigzag"
-      d={zigzagPath(labelX - half, labelX + half, timelineHeight)}
-      fill="none"
-      stroke-width="0.5"
-      stroke-dasharray="2"
+    <!--
+      Full-height zigzag rendered as one <rect> filled with a repeating
+      <pattern> of a single zigzag period, so the browser tiles a tiny tile
+      (clipped to the painted area) instead of building/parsing an
+      O(timelineHeight) polyline with dash tessellation on every render.
+    -->
+    <defs>
+      <pattern
+        id="zigzag-{seg.key}"
+        patternUnits="userSpaceOnUse"
+        x={labelX - half}
+        y={0}
+        width={half * 2}
+        height={ZIGZAG_STEP * 2}
+      >
+        <path
+          class="zigzag"
+          d="M 0 0 L {half * 2} {ZIGZAG_STEP} L 0 {ZIGZAG_STEP * 2}"
+          fill="none"
+          stroke-width="1"
+          stroke-dasharray="2"
+        />
+      </pattern>
+    </defs>
+    <rect
+      fill="url(#zigzag-{seg.key})"
+      x={labelX - half}
+      y={0}
+      width={half * 2}
+      height={timelineHeight}
     />
     {@render marker(labelX, height, {
       text: translate('workflows.show-idle-time-segment', {
@@ -84,7 +97,7 @@
     <text
       class="zigzag-label"
       font-size="10"
-      transform="rotate(90, {labelX}, {labelY})"
+      transform="rotate(45, {labelX}, {labelY})"
       x={labelX - radius}
       y={labelY + 3}
     >
