@@ -299,7 +299,7 @@
   // visible pixel band, which getWindowBounds turns into a row range. Not
   // IntersectionObserver: the browser drops IO callbacks during fast scroll, so
   // the window trailed the viewport and rows blanked until it settled.
-  let visibleBand = $state<[number, number] | null>(null);
+  let visibleBand = $state.raw<[number, number] | null>(null);
   let scroller: HTMLElement | null = null;
   let bandRafId: ReturnType<typeof requestAnimationFrame> | undefined;
   let lastTop = NaN;

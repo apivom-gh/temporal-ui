@@ -77,7 +77,8 @@
     pendingActivity && pendingActivity.pauseInfo?.pauseTime,
   );
 
-  let decodedLocalActivity: SummaryAttribute | undefined = $state(undefined);
+  let decodedLocalActivity: SummaryAttribute | undefined =
+    $state.raw(undefined);
 
   // Keyed on group (not onMount) so it re-runs on pooled re-point; reuses a
   // value already decoded onto the group, otherwise decodes once.
