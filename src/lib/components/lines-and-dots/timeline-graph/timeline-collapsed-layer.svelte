@@ -10,13 +10,41 @@
   type Props = {
     scale: TimelineScale;
     timelineHeight: number;
+    // Visible pixel band; the zigzag renders only across this range instead of
+    // the full canvas height so Chromium never rasterizes a giant pattern fill.
+    bandTop?: number;
+    bandHeight?: number;
     readOnly?: boolean;
     onToggle: (segmentKey: string) => void;
   };
-  let { scale, timelineHeight, readOnly = false, onToggle }: Props = $props();
+  let {
+    scale,
+    timelineHeight,
+    bandTop = 0,
+    bandHeight,
+    readOnly = false,
+    onToggle,
+  }: Props = $props();
 
   const ZIGZAG_HALF_WIDTH = 5;
   const ZIGZAG_STEP = 8;
+
+  // Zigzag surface = the visible band, clamped to [0, timelineHeight] so it
+  // never spills below the x-axis. Falls back to full height before first band.
+  const zigzagTop = $derived(
+    bandHeight != null ? Math.min(Math.max(bandTop, 0), timelineHeight) : 0,
+  );
+  const zigzagHeight = $derived(
+    Math.max(
+      0,
+      (bandHeight != null
+        ? Math.min(bandTop + bandHeight, timelineHeight)
+        : timelineHeight) - zigzagTop,
+    ),
+  );
+  // Keep the tiled pattern phase-aligned to canvas coords as the band scrolls,
+  // so the teeth don't crawl. Pattern repeats every ZIGZAG_STEP * 2 px.
+  const zigzagPatternY = $derived(-(zigzagTop % (ZIGZAG_STEP * 2)));
 
   const HIT_HALF_WIDTH = Math.max(RADIUS, 12);
   const HIT_WIDTH = HIT_HALF_WIDTH * 2;
@@ -65,19 +93,21 @@
   })}
   {#if seg.isCollapsed}
     {@const half = Math.min(ZIGZAG_HALF_WIDTH, (seg.endPx - seg.startPx) / 4)}
-    <!-- Full-height zigzag as a tiled <pattern> (rasterized once, not a long polyline). -->
+    <!-- Zigzag as a tiled <pattern>, windowed to the visible band so Chromium
+         never rasterizes the pattern across the full canvas height. -->
     <svg
-      class="absolute top-0 overflow-visible"
+      class="absolute overflow-visible"
       style:left="{labelX - half}px"
+      style:top="{zigzagTop}px"
       style:width="{half * 2}px"
-      style:height="{timelineHeight}px"
+      style:height="{zigzagHeight}px"
     >
       <defs>
         <pattern
           id="zigzag-{seg.key}"
           patternUnits="userSpaceOnUse"
           x={0}
-          y={0}
+          y={zigzagPatternY}
           width={half * 2}
           height={ZIGZAG_STEP * 2}
         >
@@ -92,7 +122,7 @@
       </defs>
       <rect
         width={half * 2}
-        height={timelineHeight}
+        height={zigzagHeight}
         fill="url(#zigzag-{seg.key})"
       />
     </svg>

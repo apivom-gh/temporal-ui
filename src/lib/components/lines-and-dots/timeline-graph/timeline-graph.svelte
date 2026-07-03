@@ -300,6 +300,14 @@
   // IntersectionObserver: the browser drops IO callbacks during fast scroll, so
   // the window trailed the viewport and rows blanked until it settled.
   let visibleBand = $state.raw<[number, number] | null>(null);
+
+  // Visible pixel band, used to window full-height overlays (the collapsed-idle
+  // zigzag) so they don't rasterize the entire tens-of-thousands-px canvas.
+  const layerBandTop = $derived(visibleBand ? visibleBand[0] : 0);
+  const layerBandHeight = $derived(
+    visibleBand ? visibleBand[1] - visibleBand[0] : timelineHeight,
+  );
+
   let scroller: HTMLElement | null = null;
   let bandRafId: ReturnType<typeof requestAnimationFrame> | undefined;
   let lastTop = NaN;
@@ -497,6 +505,8 @@
           <TimelineCollapsedLayer
             {scale}
             {timelineHeight}
+            bandTop={layerBandTop}
+            bandHeight={layerBandHeight}
             {readOnly}
             onToggle={toggleSegment}
           />
