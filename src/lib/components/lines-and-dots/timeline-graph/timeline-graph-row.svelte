@@ -138,8 +138,12 @@
     setActiveGroup(group);
   };
 
+  // Only activity groups carry an ActivityTaskStarted event; guard so other
+  // categories don't scan their whole eventList every re-point for nothing.
   const activityTaskScheduled = $derived(
-    group.eventList.find(isActivityTaskStartedEvent),
+    group.category === 'activity'
+      ? group.eventList.find(isActivityTaskStartedEvent)
+      : undefined,
   );
   const retryAttempt = $derived(
     activityTaskScheduled?.attributes?.attempt ?? 0,
