@@ -100,13 +100,15 @@
 
   .grid-line {
     position: absolute;
-    width: 0;
+    width: 1px;
     opacity: 0.3;
 
-    /* Dashed border, not a gradient background: the timeline can be tens of
-       thousands of px tall, past WebKit's max backing-store height, so Safari
-       drops a gradient fill. A dashed border paints at any height. */
-    border-left: 1px dashed rgb(var(--color-text-primary));
+    /* Solid fill, not a dashed border or gradient: the timeline can be tens of
+       thousands of px tall. A dashed border makes Chromium rasterize thousands
+       of dash segments (huge GPU textures → jank); a gradient fill exceeds
+       WebKit's backing-store height and vanishes in Safari. A solid fill is
+       cheap and renders at any height in both. */
+    background: rgb(var(--color-text-primary));
   }
 
   .tick-label {
