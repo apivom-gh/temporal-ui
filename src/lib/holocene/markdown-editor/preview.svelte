@@ -33,28 +33,20 @@
 
   const resizeIframe = () => {
     if (!iframe) return;
+    const iframeDocument = iframe.contentDocument;
+    if (!iframeDocument) return;
 
-    // contentDocument access throws a SecurityError for a cross-origin iframe
-    // (e.g. Chromatic's capture-loopback proxy serves it from another origin),
-    // which would otherwise surface as an unhandled error during onload.
-    try {
-      const iframeDocument = iframe.contentDocument;
-      if (!iframeDocument) return;
+    const minHeight = 100;
+    iframe.height = '0';
+    iframe.style.height = '0px';
 
-      const minHeight = 100;
-      iframe.height = '0';
-      iframe.style.height = '0px';
-
-      const height = Math.max(
-        iframeDocument.documentElement.scrollHeight,
-        iframeDocument.body.scrollHeight,
-        minHeight,
-      );
-      iframe.height = `${height + 2}`;
-      iframe.style.height = `${height + 2}px`;
-    } catch {
-      // Cross-origin iframe — can't measure its content; leave height as-is.
-    }
+    const height = Math.max(
+      iframeDocument.documentElement.scrollHeight,
+      iframeDocument.body.scrollHeight,
+      minHeight,
+    );
+    iframe.height = `${height + 2}`;
+    iframe.style.height = `${height + 2}px`;
   };
 
   $effect(() => {
