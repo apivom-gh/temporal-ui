@@ -100,13 +100,13 @@
 
   .grid-line {
     position: absolute;
-    width: 1px;
+    width: 0;
     opacity: 0.3;
-    background-image: repeating-linear-gradient(
-      to bottom,
-      currentColor 0 2px,
-      transparent 2px 4px
-    );
+
+    /* Dashed border, not a gradient background: the timeline can be tens of
+       thousands of px tall, past WebKit's max backing-store height, so Safari
+       drops a gradient fill. A dashed border paints at any height. */
+    border-left: 1px dashed rgb(var(--color-text-primary));
   }
 
   .tick-label {
