@@ -51,7 +51,9 @@ export class Timeline {
   private readonly _endUnbounded = $derived(!this.workflow.endTime);
 
   private readonly _endMs = $derived.by(() => {
-    const end = this.workflow.endTime ?? this._getCurrentTimeMs();
+    // `||` not `??`: a running workflow's endTime is often an empty string, not
+    // null — fall back to "now" so validTimeToDate doesn't throw on "".
+    const end = this.workflow.endTime || this._getCurrentTimeMs();
     return validTimeToDate(end).getTime();
   });
 
