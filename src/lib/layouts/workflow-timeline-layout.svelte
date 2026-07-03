@@ -62,7 +62,7 @@
 
   const reverseSort = $derived($eventFilterSort === 'descending');
 
-  let bufferGroups = $state<EventGroup[]>([]);
+  let bufferGroups = $state.raw<EventGroup[]>([]);
 
   const filteredBufferGroups = $derived.by(() => {
     const active = $eventTypeFilter;
