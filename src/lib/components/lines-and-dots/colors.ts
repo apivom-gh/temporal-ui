@@ -29,7 +29,7 @@ const STATUS_STROKE_COLORS: Record<
 
 export const getStatusStrokeColor = (
   status: WorkflowStatus | EventClassification | 'Delayed',
-): string => STATUS_STROKE_COLORS[status] ?? DEFAULT_STROKE_COLOR;
+): string => (status && STATUS_STROKE_COLORS[status]) ?? DEFAULT_STROKE_COLOR;
 
 const CATEGORY_STROKE_COLORS: Record<
   EventTypeCategory | 'pending' | 'retry' | 'marker' | 'command',

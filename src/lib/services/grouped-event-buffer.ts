@@ -607,7 +607,7 @@ export function enrichGroups(
 
     if (isActivityTaskScheduledEvent(initial)) {
       const pa = byActivityId.get(
-        initial.activityTaskScheduledEventAttributes?.activityId,
+        initial.activityTaskScheduledEventAttributes?.activityId ?? '',
       );
       if (pa && group.eventList.length < 3) {
         group.pendingActivity = pa;
