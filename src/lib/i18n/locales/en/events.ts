@@ -68,6 +68,8 @@ export const Strings = {
   'event-history-load-error': 'Could not parse JSON',
   'event-classification-label': 'Event Classification',
   'row-accessible-name': 'Event {{eventType}}: {{classification}}',
+  'expand-details': 'Expand details',
+  'collapse-details': 'Collapse details',
   'event-classification': {
     unspecified: 'Unspecified',
     scheduled: 'Scheduled',
@@ -100,6 +102,4 @@ export const Strings = {
   'empty-search-attributes': 'No Search Attributes Found',
   'empty-memo-attributes': 'No Memo Attributes Found',
   'empty-header-attributes': 'No Header Attributes Found',
-  'expand-details': 'Expand details',
-  'collapse-details': 'Collapse details',
 } as const;
