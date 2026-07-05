@@ -11,8 +11,8 @@
   }
 
   let {
-    title = 'Temporal',
-    url = 'https://temporal.io',
+    title = 'Apivom Staff',
+    url = 'https://staff.apivom.com',
     image = banner,
   }: Props = $props();
 </script>

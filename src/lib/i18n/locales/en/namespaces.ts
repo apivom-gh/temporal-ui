@@ -19,7 +19,7 @@ export const Strings = {
   'client-actions': 'Client Actions',
   'signal-workflow': 'Signal Workflow',
   'unauthorized-namespace-error': 'You do not have access to this namespace.',
-  'select-namespace-welcome': 'Welcome to Temporal',
+  'select-namespace-welcome': 'Welcome to Apivom Staff',
   'select-namespace': 'Select a Namespace to get started.',
   'search-namespaces': 'Search Namespaces',
   'select-namespace-empty-state':
