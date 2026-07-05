@@ -38,12 +38,12 @@
     {#if subtitleHref}
       <a href={subtitleHref} class="text-inherit no-underline">
         <p class="text-base font-medium group-data-[nav=closed]:hidden">
-          {subtitle || 'Web UI'}
+          {subtitle || 'Apivom Staff'}
         </p>
       </a>
     {:else}
       <p class="text-base font-medium group-data-[nav=closed]:hidden">
-        {subtitle || 'Web UI'}
+        {subtitle || 'Apivom Staff'}
       </p>
     {/if}
   </div>
